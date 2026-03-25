@@ -45,6 +45,48 @@ export async function fireEvent(
   ]);
 }
 
+/** イベントタイプの表示ラベル */
+const EVENT_LABELS: Record<string, { emoji: string; label: string; color: number }> = {
+  friend_add: { emoji: '👋', label: '友だち追加', color: 0x06c755 },
+  message_received: { emoji: '💬', label: 'メッセージ受信', color: 0x3b82f6 },
+  tag_change: { emoji: '🏷️', label: 'タグ変更', color: 0xf59e0b },
+  cv_fire: { emoji: '🎯', label: 'コンバージョン', color: 0xef4444 },
+};
+
+/** Discord Webhook URLかどうか判定 */
+function isDiscordWebhook(url: string): boolean {
+  return url.includes('discord.com/api/webhooks/');
+}
+
+/** LINE Harnessイベント → Discord Embed形式に変換 */
+function toDiscordPayload(eventType: string, payload: EventPayload): Record<string, unknown> {
+  const meta = EVENT_LABELS[eventType] ?? { emoji: '📡', label: eventType, color: 0x6b7280 };
+  const data = payload.eventData ?? {};
+
+  const fields: Array<{ name: string; value: string; inline?: boolean }> = [];
+
+  if (data.displayName) fields.push({ name: '名前', value: String(data.displayName), inline: true });
+  if (data.tagName) fields.push({ name: 'タグ', value: String(data.tagName), inline: true });
+  if (data.action) fields.push({ name: 'アクション', value: String(data.action), inline: true });
+  if (data.text) fields.push({ name: 'メッセージ', value: String(data.text).slice(0, 200) });
+  if (data.amount) fields.push({ name: '金額', value: `¥${Number(data.amount).toLocaleString()}`, inline: true });
+  if (data.type) fields.push({ name: '種別', value: String(data.type), inline: true });
+
+  if (fields.length === 0 && Object.keys(data).length > 0) {
+    fields.push({ name: 'データ', value: '```json\n' + JSON.stringify(data, null, 2).slice(0, 500) + '\n```' });
+  }
+
+  return {
+    embeds: [{
+      title: `${meta.emoji} ${meta.label}`,
+      color: meta.color,
+      fields,
+      timestamp: new Date().toISOString(),
+      footer: { text: 'LINE Harness' },
+    }],
+  };
+}
+
 /** 送信Webhookへの通知 */
 async function fireOutgoingWebhooks(
   db: D1Database,
@@ -55,16 +97,16 @@ async function fireOutgoingWebhooks(
     const webhooks = await getActiveOutgoingWebhooksByEvent(db, eventType);
     for (const wh of webhooks) {
       try {
-        const body = JSON.stringify({
-          event: eventType,
-          timestamp: jstNow(),
-          data: payload,
-        });
+        // Discord Webhook URLの場合はEmbed形式に変換
+        const bodyObj = isDiscordWebhook(wh.url)
+          ? toDiscordPayload(eventType, payload)
+          : { event: eventType, timestamp: jstNow(), data: payload };
 
+        const body = JSON.stringify(bodyObj);
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
 
-        // HMAC署名（シークレットがある場合）
-        if (wh.secret) {
+        // HMAC署名（シークレットがある場合、Discord以外のみ）
+        if (wh.secret && !isDiscordWebhook(wh.url)) {
           const encoder = new TextEncoder();
           const key = await crypto.subtle.importKey(
             'raw',
