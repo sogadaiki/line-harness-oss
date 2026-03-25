@@ -193,8 +193,27 @@ async function handleEvent(
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
-    const friend = await getFriendByLineUserId(db, userId);
-    if (!friend) return;
+    let friend = await getFriendByLineUserId(db, userId);
+    if (!friend) {
+      // Existing follower not yet in DB — auto-register on first message
+      let profile;
+      try {
+        profile = await lineClient.getProfile(userId);
+      } catch (err) {
+        console.error('Failed to get profile for', userId, err);
+      }
+      friend = await upsertFriend(db, {
+        lineUserId: userId,
+        displayName: profile?.displayName ?? null,
+        pictureUrl: profile?.pictureUrl ?? null,
+        statusMessage: profile?.statusMessage ?? null,
+      });
+      if (lineAccountId) {
+        await db.prepare('UPDATE friends SET line_account_id = ? WHERE id = ? AND line_account_id IS NULL')
+          .bind(lineAccountId, friend.id).run();
+      }
+      await fireEvent(db, 'friend_add', { friendId: friend.id, eventData: { displayName: friend.display_name, source: 'first_message' } }, lineAccessToken, lineAccountId);
+    }
 
     const incomingText = textMessage.text;
     const now = jstNow();
