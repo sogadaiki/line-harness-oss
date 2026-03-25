@@ -12,6 +12,7 @@ import {
   completeFriendScenario,
   upsertChatOnMessage,
   getLineAccounts,
+  addTagToFriend,
   jstNow,
 } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
@@ -317,6 +318,7 @@ async function handleEvent(
         response_type: string;
         response_content: string;
         is_active: number;
+        on_match_tag_id: string | null;
         created_at: string;
       }>();
 
@@ -345,6 +347,19 @@ async function handleEvent(
             .run();
         } catch (err) {
           console.error('Failed to send auto-reply', err);
+        }
+
+        // Auto-tag on match
+        if (rule.on_match_tag_id) {
+          try {
+            await addTagToFriend(db, friend.id, rule.on_match_tag_id);
+            await fireEvent(db, 'tag_change', {
+              friendId: friend.id,
+              eventData: { tagId: rule.on_match_tag_id, action: 'add', source: 'auto_reply' },
+            }, lineAccessToken, lineAccountId);
+          } catch (err) {
+            console.error('Failed to auto-tag on reply match', err);
+          }
         }
 
         matched = true;
