@@ -346,12 +346,18 @@ export async function enrollFriendInScenario(
   await db
     .prepare(
       `INSERT INTO friend_scenarios (id, friend_id, scenario_id, current_step_order, status, started_at, next_delivery_at, updated_at)
-       VALUES (?, ?, ?, 0, 'active', ?, ?, ?)`,
+       VALUES (?, ?, ?, 0, 'active', ?, ?, ?)
+       ON CONFLICT (friend_id, scenario_id) WHERE status != 'completed' DO NOTHING`,
     )
     .bind(id, friendId, scenarioId, now, nextDeliveryAt, now)
     .run();
 
-  return (await db
+  // Return existing enrollment if INSERT was skipped (duplicate)
+  const result = await db
+    .prepare(`SELECT * FROM friend_scenarios WHERE friend_id = ? AND scenario_id = ? AND status != 'completed'`)
+    .bind(friendId, scenarioId)
+    .first<FriendScenario>();
+  return result ?? (await db
     .prepare(`SELECT * FROM friend_scenarios WHERE id = ?`)
     .bind(id)
     .first<FriendScenario>())!;

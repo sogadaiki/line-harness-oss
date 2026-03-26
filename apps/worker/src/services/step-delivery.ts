@@ -281,6 +281,15 @@ function cleanEmptyNodes(obj: unknown): void {
 
 export function buildMessage(messageType: string, messageContent: string): Message {
   if (messageType === 'text') {
+    // Support JSON wrapper with quickReply: {"text": "...", "quickReply": {...}}
+    try {
+      const parsed = JSON.parse(messageContent) as { text?: string; quickReply?: { items: unknown[] } };
+      if (parsed.text && parsed.quickReply) {
+        return { type: 'text', text: parsed.text, quickReply: parsed.quickReply } as Message;
+      }
+    } catch {
+      // Not JSON — plain text, fall through
+    }
     return { type: 'text', text: messageContent };
   }
 
@@ -305,11 +314,16 @@ export function buildMessage(messageType: string, messageContent: string): Messa
   if (messageType === 'flex') {
     try {
       const contents = JSON.parse(messageContent);
+      // Support quickReply wrapper: {"contents": {...}, "quickReply": {...}}
+      const quickReply = contents.quickReply;
+      const flexContents = contents.quickReply ? contents.contents : contents;
       // Remove empty text nodes (from {{#if_ref}} conditional blocks)
-      cleanEmptyNodes(contents);
+      cleanEmptyNodes(flexContents);
       // Extract first text element for altText (shown in notifications)
-      const altText = extractFlexAltText(contents) || 'お知らせ';
-      return { type: 'flex', altText, contents };
+      const altText = extractFlexAltText(flexContents) || 'お知らせ';
+      const msg: Message = { type: 'flex', altText, contents: flexContents };
+      if (quickReply) (msg as Record<string, unknown>).quickReply = quickReply;
+      return msg;
     } catch {
       return { type: 'text', text: messageContent };
     }
