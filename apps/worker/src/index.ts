@@ -6,6 +6,7 @@ import { processStepDeliveries } from './services/step-delivery.js';
 import { processScheduledBroadcasts } from './services/broadcast.js';
 import { processReminderDeliveries } from './services/reminder-delivery.js';
 import { checkAccountHealth } from './services/ban-monitor.js';
+import { processInterviewButchDetection } from './services/interview-followup.js';
 import { authMiddleware } from './middleware/auth.js';
 import { webhook } from './routes/webhook.js';
 import { friends } from './routes/friends.js';
@@ -151,6 +152,12 @@ async function scheduled(
     );
   }
   jobs.push(checkAccountHealth(env.DB));
+
+  // 面談ブッチ検知（全アカウント共通・DB参照のみなのでtoken不要）
+  for (const token of activeTokens) {
+    jobs.push(processInterviewButchDetection(env.DB, token));
+    break; // ブッチ検知はDB操作のみ。1回で全アカウント処理
+  }
 
   await Promise.allSettled(jobs);
 }

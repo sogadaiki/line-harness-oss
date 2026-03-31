@@ -13,10 +13,12 @@ import {
   upsertChatOnMessage,
   getLineAccounts,
   addTagToFriend,
+  getActiveAutomationsByEvent,
   jstNow,
 } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
+import { processInterviewDateDetection } from '../services/interview-detection.js';
 import type { Env } from '../index.js';
 
 const webhook = new Hono<Env>();
@@ -173,8 +175,84 @@ async function handleEvent(
       }
     }
 
+    // ref パラメータ抽出（LINE follow event の follow.ref フィールド）
+    const followRef = (event as { follow?: { ref?: string } }).follow?.ref ?? null;
+
+    // ref に基づくオートメーション実行（友だち追加時の流入経路別あいさつ + タグ付与）
+    let replyTokenUsed = false;
+    if (followRef || true) {
+      // follow イベントのオートメーションを検索
+      const allAutomations = await getActiveAutomationsByEvent(db, 'follow');
+      const accountAutomations = allAutomations.filter(
+        (a) => !a.line_account_id || !lineAccountId || a.line_account_id === lineAccountId,
+      );
+
+      // ref にマッチするオートメーション or 条件なし（デフォルト）を priority 順に探す
+      for (const automation of accountAutomations) {
+        const conditions = JSON.parse(automation.conditions) as Record<string, unknown>;
+        const actions = JSON.parse(automation.actions) as Array<{ type: string; [key: string]: unknown }>;
+
+        // ref 条件チェック
+        if (conditions.ref) {
+          if (followRef !== conditions.ref) continue;
+        } else if (followRef && Object.keys(conditions).length === 0) {
+          // デフォルト（条件なし）は ref が他でマッチしなかった場合のフォールバック
+          // priority が低い場合にのみマッチ（priority順でソート済み）
+        }
+
+        // アクション実行
+        for (const action of actions) {
+          if (action.type === 'reply' && !replyTokenUsed) {
+            const messages = action.messages as Array<{ type: string; text?: string }>;
+            if (messages?.length) {
+              try {
+                const lineMessages = messages.map(m => buildMessage(m.type || 'text', m.text || ''));
+                await lineClient.replyMessage(event.replyToken, lineMessages);
+                replyTokenUsed = true;
+
+                // ログ記録
+                for (const m of messages) {
+                  const logId = crypto.randomUUID();
+                  await db
+                    .prepare(
+                      `INSERT INTO messages_log (id, friend_id, direction, message_type, content, delivery_type, created_at)
+                       VALUES (?, ?, 'outgoing', 'text', ?, 'reply', ?)`,
+                    )
+                    .bind(logId, friend.id, m.text || '', jstNow())
+                    .run();
+                }
+              } catch (err) {
+                console.error('Failed follow automation reply:', err);
+              }
+            }
+          } else if (action.type === 'addTag') {
+            const tagName = (action as { tagName?: string }).tagName;
+            if (tagName) {
+              const tag = await db
+                .prepare('SELECT id FROM tags WHERE name = ? LIMIT 1')
+                .bind(tagName)
+                .first<{ id: string }>();
+              if (tag) {
+                await addTagToFriend(db, friend.id, tag.id);
+              }
+            }
+          }
+        }
+        break; // 最初にマッチしたオートメーションのみ実行
+      }
+    }
+
+    // ref をメタデータに保存
+    if (followRef) {
+      const existing = await db.prepare('SELECT metadata FROM friends WHERE id = ?').bind(friend.id).first<{ metadata: string | null }>();
+      const meta = JSON.parse(existing?.metadata || '{}');
+      meta.follow_ref = followRef;
+      await db.prepare('UPDATE friends SET metadata = ?, updated_at = ? WHERE id = ?')
+        .bind(JSON.stringify(meta), jstNow(), friend.id).run();
+    }
+
     // イベントバス発火: friend_add
-    await fireEvent(db, 'friend_add', { friendId: friend.id, eventData: { displayName: friend.display_name } }, lineAccessToken, lineAccountId);
+    await fireEvent(db, 'friend_add', { friendId: friend.id, eventData: { displayName: friend.display_name, ref: followRef } }, lineAccessToken, lineAccountId);
     return;
   }
 
@@ -323,6 +401,19 @@ async function handleEvent(
       } catch (err) {
         console.error('Cross-account trigger error:', err);
       }
+    }
+
+    // 面談日時抽出: 面談予約済タグを持つ友だちのメッセージから日時パターンを検出
+    // 検出した場合、リマインダ登録 + 確認返信を行う（replyToken消費）
+    const interviewDetected = await processInterviewDateDetection(
+      db, friend.id, lineAccountId, incomingText, lineClient, event.replyToken,
+    );
+    if (interviewDetected) {
+      await fireEvent(db, 'message_received', {
+        friendId: friend.id,
+        eventData: { text: incomingText, matched: true, interviewDetected: true },
+      }, lineAccessToken, lineAccountId);
+      return;
     }
 
     // 自動返信チェック（このアカウントのルール + グローバルルールのみ）
