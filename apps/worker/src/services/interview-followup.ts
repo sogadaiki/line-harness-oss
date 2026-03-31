@@ -25,6 +25,11 @@ export async function processInterviewButchDetection(
   db: D1Database,
   lineAccessToken: string,
 ): Promise<void> {
+  // 3時間毎に実行（cron自体は5分毎だが、ブッチ判定はアバウトでいい）
+  const jstHour = new Date(Date.now() + 9 * 60 * 60_000).getUTCHours();
+  const jstMinute = new Date(Date.now() + 9 * 60 * 60_000).getUTCMinutes();
+  if (jstHour % 3 !== 0 || jstMinute >= 5) return;
+
   const now = new Date();
   const nowMs = now.getTime();
 
