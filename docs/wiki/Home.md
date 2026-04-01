@@ -101,6 +101,7 @@ LINE Harness は、LINE公式アカウント向けのオープンソース CRM /
 20. **[Deployment](21-Deployment.md)** — 本番デプロイ、スケーリング
 21. **[Operations](22-Operations.md)** — 運用、監視、トラブルシューティング
 22. **[Claude Code Integration](23-Claude-Code-Integration.md)** — AI連携、プロンプト例
+23. **[Supabase LINE Auth](24-Supabase-LINE-Auth.md)** — Supabase Custom OAuth/OIDC + LINE Login 連携
 
 ## D1テーブル一覧（42テーブル）
 
