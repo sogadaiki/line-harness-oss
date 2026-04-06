@@ -143,6 +143,29 @@ export async function updateFriendFollowStatus(
     .run();
 }
 
+/** Get merged metadata across all friend records sharing the same user_id (UUID). */
+export async function getMergedMetadataByUserId(
+  db: D1Database,
+  userId: string,
+): Promise<Record<string, unknown>> {
+  const result = await db
+    .prepare(`SELECT metadata FROM friends WHERE user_id = ? AND metadata IS NOT NULL AND metadata != '{}'`)
+    .bind(userId)
+    .all<{ metadata: string }>();
+  const merged: Record<string, unknown> = {};
+  for (const row of result.results) {
+    try {
+      const meta = JSON.parse(row.metadata);
+      for (const [k, v] of Object.entries(meta)) {
+        if (v != null && v !== '' && !(merged[k] != null && merged[k] !== '')) {
+          merged[k] = v;
+        }
+      }
+    } catch { /* skip invalid JSON */ }
+  }
+  return merged;
+}
+
 export async function getFriendCount(db: D1Database): Promise<number> {
   const row = await db
     .prepare(`SELECT COUNT(*) as count FROM friends`)

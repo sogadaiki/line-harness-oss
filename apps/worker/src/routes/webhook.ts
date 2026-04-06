@@ -94,6 +94,8 @@ async function handleEvent(
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
+    console.log(`[follow] userId=${userId} lineAccountId=${lineAccountId}`);
+
     // プロフィール取得 & 友だち登録/更新
     let profile;
     try {
@@ -102,6 +104,8 @@ async function handleEvent(
       console.error('Failed to get profile for', userId, err);
     }
 
+    console.log(`[follow] profile=${profile?.displayName ?? 'null'}`);
+
     const friend = await upsertFriend(db, {
       lineUserId: userId,
       displayName: profile?.displayName ?? null,
@@ -109,10 +113,13 @@ async function handleEvent(
       statusMessage: profile?.statusMessage ?? null,
     });
 
-    // Set line_account_id for multi-account tracking
+    console.log(`[follow] friend.id=${friend.id} friend.line_account_id=${(friend as any).line_account_id}`);
+
+    // Set line_account_id for multi-account tracking (always update on follow)
     if (lineAccountId) {
-      await db.prepare('UPDATE friends SET line_account_id = ? WHERE id = ? AND line_account_id IS NULL')
-        .bind(lineAccountId, friend.id).run();
+      await db.prepare('UPDATE friends SET line_account_id = ?, updated_at = ? WHERE id = ?')
+        .bind(lineAccountId, jstNow(), friend.id).run();
+      console.log(`[follow] line_account_id set to ${lineAccountId} for friend ${friend.id}`);
     }
 
     // friend_add シナリオに登録（このアカウントのシナリオのみ）
@@ -134,7 +141,9 @@ async function handleEvent(
             const firstStep = steps[0];
             if (firstStep && firstStep.delay_minutes === 0 && friendScenario.status === 'active') {
               try {
-                const expandedContent = expandVariables(firstStep.message_content, friend as { id: string; display_name: string | null; user_id: string | null });
+                const { resolveMetadata } = await import('../services/step-delivery.js');
+                const resolvedMeta = await resolveMetadata(db, { user_id: (friend as unknown as Record<string, string | null>).user_id, metadata: (friend as unknown as Record<string, string | null>).metadata });
+                const expandedContent = expandVariables(firstStep.message_content, { ...friend, metadata: resolvedMeta } as Parameters<typeof expandVariables>[1]);
                 const message = buildMessage(firstStep.message_type, expandedContent);
                 await lineClient.replyMessage(event.replyToken, [message]);
                 console.log(`Immediate delivery: sent step ${firstStep.id} to ${userId}`);
@@ -181,26 +190,21 @@ async function handleEvent(
     // ref に基づくオートメーション実行（友だち追加時の流入経路別あいさつ + タグ付与）
     let replyTokenUsed = false;
     if (followRef || true) {
-      // follow イベントのオートメーションを検索
       const allAutomations = await getActiveAutomationsByEvent(db, 'follow');
       const accountAutomations = allAutomations.filter(
         (a) => !a.line_account_id || !lineAccountId || a.line_account_id === lineAccountId,
       );
 
-      // ref にマッチするオートメーション or 条件なし（デフォルト）を priority 順に探す
       for (const automation of accountAutomations) {
         const conditions = JSON.parse(automation.conditions) as Record<string, unknown>;
         const actions = JSON.parse(automation.actions) as Array<{ type: string; [key: string]: unknown }>;
 
-        // ref 条件チェック
         if (conditions.ref) {
           if (followRef !== conditions.ref) continue;
         } else if (followRef && Object.keys(conditions).length === 0) {
-          // デフォルト（条件なし）は ref が他でマッチしなかった場合のフォールバック
-          // priority が低い場合にのみマッチ（priority順でソート済み）
+          // デフォルト（条件なし）はフォールバック
         }
 
-        // アクション実行
         for (const action of actions) {
           if (action.type === 'reply' && !replyTokenUsed) {
             const messages = action.messages as Array<{ type: string; text?: string }>;
@@ -209,8 +213,6 @@ async function handleEvent(
                 const lineMessages = messages.map(m => buildMessage(m.type || 'text', m.text || ''));
                 await lineClient.replyMessage(event.replyToken, lineMessages);
                 replyTokenUsed = true;
-
-                // ログ記録
                 for (const m of messages) {
                   const logId = crypto.randomUUID();
                   await db
@@ -238,7 +240,7 @@ async function handleEvent(
             }
           }
         }
-        break; // 最初にマッチしたオートメーションのみ実行
+        break;
       }
     }
 
@@ -262,6 +264,52 @@ async function handleEvent(
     if (!userId) return;
 
     await updateFriendFollowStatus(db, userId, false);
+    return;
+  }
+
+  // Postback events — triggered by Flex buttons with action.type: "postback"
+  // Uses the same auto_replies matching but without displaying text in chat
+  if (event.type === 'postback') {
+    const userId = event.source.type === 'user' ? event.source.userId : undefined;
+    if (!userId) return;
+
+    const friend = await getFriendByLineUserId(db, userId);
+    if (!friend) return;
+
+    const postbackData = (event as unknown as { postback: { data: string } }).postback.data;
+
+    // Match postback data against auto_replies (exact match on keyword)
+    const autoReplyQuery = lineAccountId
+      ? `SELECT * FROM auto_replies WHERE is_active = 1 AND (line_account_id IS NULL OR line_account_id = ?) ORDER BY created_at ASC`
+      : `SELECT * FROM auto_replies WHERE is_active = 1 AND line_account_id IS NULL ORDER BY created_at ASC`;
+    const autoReplyStmt = db.prepare(autoReplyQuery);
+    const autoReplies = await (lineAccountId ? autoReplyStmt.bind(lineAccountId) : autoReplyStmt)
+      .all<{
+        id: string;
+        keyword: string;
+        match_type: 'exact' | 'contains';
+        response_type: string;
+        response_content: string;
+      }>();
+
+    for (const rule of autoReplies.results) {
+      const isMatch = rule.match_type === 'exact'
+        ? postbackData === rule.keyword
+        : postbackData.includes(rule.keyword);
+
+      if (isMatch) {
+        try {
+          const { resolveMetadata } = await import('../services/step-delivery.js');
+          const resolvedMeta = await resolveMetadata(db, { user_id: (friend as unknown as Record<string, string | null>).user_id, metadata: (friend as unknown as Record<string, string | null>).metadata });
+          const expandedContent = expandVariables(rule.response_content, { ...friend, metadata: resolvedMeta } as Parameters<typeof expandVariables>[1], workerUrl);
+          const replyMsg = buildMessage(rule.response_type, expandedContent);
+          await lineClient.replyMessage(event.replyToken, [replyMsg]);
+        } catch (err) {
+          console.error('Failed to send postback reply', err);
+        }
+        break;
+      }
+    }
     return;
   }
 
@@ -380,7 +428,7 @@ async function handleEvent(
               footer: { type: 'box', layout: 'vertical', paddingAll: '16px',
                 contents: [
                   { type: 'button', action: { type: 'message', label: '導入について相談する', text: '導入支援を希望します' }, style: 'primary', color: '#06C755' },
-                  { type: 'button', action: { type: 'uri', label: 'フィードバックを送る', uri: 'https://liff.line.me/2009554425-4IMBmLQ9?page=form&id=0c81910a-fe27-41a7-bf8c-1411a9240155' }, style: 'secondary', margin: 'sm' },
+                  ...(c.env.LIFF_URL ? [{ type: 'button', action: { type: 'uri', label: 'フィードバックを送る', uri: `${c.env.LIFF_URL}?page=form` }, style: 'secondary', margin: 'sm' }] : []),
                 ],
               },
             }))]);
@@ -419,8 +467,11 @@ async function handleEvent(
     // 自動返信チェック（このアカウントのルール + グローバルルールのみ）
     // NOTE: Auto-replies use replyMessage (free, no quota) instead of pushMessage
     // The replyToken is only valid for ~1 minute after the message event
-    const autoReplies = await db
-      .prepare(`SELECT * FROM auto_replies WHERE is_active = 1 AND (line_account_id IS NULL${lineAccountId ? ` OR line_account_id = '${lineAccountId}'` : ''}) ORDER BY created_at ASC`)
+    const autoReplyQuery = lineAccountId
+      ? `SELECT * FROM auto_replies WHERE is_active = 1 AND (line_account_id IS NULL OR line_account_id = ?) ORDER BY created_at ASC`
+      : `SELECT * FROM auto_replies WHERE is_active = 1 AND line_account_id IS NULL ORDER BY created_at ASC`;
+    const autoReplyStmt = db.prepare(autoReplyQuery);
+    const autoReplies = await (lineAccountId ? autoReplyStmt.bind(lineAccountId) : autoReplyStmt)
       .all<{
         id: string;
         keyword: string;
@@ -433,6 +484,7 @@ async function handleEvent(
       }>();
 
     let matched = false;
+    let replyTokenConsumed = false;
     for (const rule of autoReplies.results) {
       const isMatch =
         rule.match_type === 'exact'
@@ -442,7 +494,9 @@ async function handleEvent(
       if (isMatch) {
         try {
           // Expand template variables ({{name}}, {{uid}}, {{auth_url:CHANNEL_ID}})
-          const expandedContent = expandVariables(rule.response_content, friend as { id: string; display_name: string | null; user_id: string | null }, workerUrl);
+          const { resolveMetadata: resolveMeta2 } = await import('../services/step-delivery.js');
+          const resolvedMeta2 = await resolveMeta2(db, { user_id: (friend as unknown as Record<string, string | null>).user_id, metadata: (friend as unknown as Record<string, string | null>).metadata });
+          const expandedContent = expandVariables(rule.response_content, { ...friend, metadata: resolvedMeta2 } as Parameters<typeof expandVariables>[1], workerUrl);
 
           // Support multi-message: response_content can be JSON array of strings
           // e.g. ["first bubble", "second bubble"] or just a plain string
@@ -458,6 +512,7 @@ async function handleEvent(
             replyMessages = [buildMessage(rule.response_type, expandedContent)];
           }
           await lineClient.replyMessage(event.replyToken, replyMessages);
+          replyTokenConsumed = true;
 
           // 送信ログ（replyMessage = 無料）
           for (const _msg of replyMessages) {
@@ -472,6 +527,7 @@ async function handleEvent(
           }
         } catch (err) {
           console.error('Failed to send auto-reply', err);
+          // replyToken may still be unused if replyMessage threw before LINE accepted it
         }
 
         // Auto-tag on match
@@ -493,9 +549,11 @@ async function handleEvent(
     }
 
     // イベントバス発火: message_received
+    // Pass replyToken only when auto_reply didn't actually consume it
     await fireEvent(db, 'message_received', {
       friendId: friend.id,
       eventData: { text: incomingText, matched },
+      replyToken: replyTokenConsumed ? undefined : event.replyToken,
     }, lineAccessToken, lineAccountId);
 
     return;

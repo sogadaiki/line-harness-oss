@@ -1,4 +1,5 @@
 import type { Context, Next } from 'hono';
+import { getStaffByApiKey } from '@line-crm/db';
 import type { Env } from '../index.js';
 
 export async function authMiddleware(c: Context<Env>, next: Next): Promise<Response | void> {
@@ -12,12 +13,17 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path === '/api/affiliates/click' ||
     path.startsWith('/t/') ||
     path.startsWith('/r/') ||
+    path.startsWith('/pool/') ||
+    path.startsWith('/images/') ||
     path.startsWith('/api/liff/') ||
     path.startsWith('/auth/') ||
+    path === '/setup' ||
     path === '/api/integrations/stripe/webhook' ||
     path.match(/^\/api\/webhooks\/incoming\/[^/]+\/receive$/) ||
     path.match(/^\/api\/forms\/[^/]+\/submit$/) ||
-    path.match(/^\/api\/forms\/[^/]+$/) // GET form definition (public for LIFF)
+    path.match(/^\/api\/forms\/[^/]+$/) || // GET form definition (public for LIFF)
+    path === '/api/meet-callback' || // Meet Harness completion callback
+    path === '/api/qr' // Public QR proxy — used by desktop landing pages
   ) {
     return next();
   }
@@ -28,14 +34,25 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
   }
 
   const token = authHeader.slice('Bearer '.length);
-  if (token !== c.env.API_KEY) {
-    return c.json({ success: false, error: 'Unauthorized' }, 401);
+
+  // Check staff_members table first
+  const staff = await getStaffByApiKey(c.env.DB, token);
+  if (staff) {
+    c.set('staff', { id: staff.id, name: staff.name, role: staff.role });
+    return next();
   }
 
-  // Set account scope if configured (for tenant-isolated Workers like hinatama)
-  if (c.env.SCOPED_LINE_ACCOUNT_ID) {
-    c.set('scopedAccountId', c.env.SCOPED_LINE_ACCOUNT_ID);
+  // Fallback: env API_KEY acts as owner
+  if (token === c.env.API_KEY) {
+    c.set('staff', { id: 'env-owner', name: 'Owner', role: 'owner' as const });
+
+    // Set account scope if configured (for tenant-isolated Workers like hinatama)
+    if (c.env.SCOPED_LINE_ACCOUNT_ID) {
+      c.set('scopedAccountId', c.env.SCOPED_LINE_ACCOUNT_ID);
+    }
+
+    return next();
   }
 
-  return next();
+  return c.json({ success: false, error: 'Unauthorized' }, 401);
 }
