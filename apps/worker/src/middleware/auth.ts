@@ -32,5 +32,10 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     return c.json({ success: false, error: 'Unauthorized' }, 401);
   }
 
+  // Set account scope if configured (for tenant-isolated Workers like hinatama)
+  if (c.env.SCOPED_LINE_ACCOUNT_ID) {
+    c.set('scopedAccountId', c.env.SCOPED_LINE_ACCOUNT_ID);
+  }
+
   return next();
 }

@@ -443,18 +443,33 @@ async function handleEvent(
         try {
           // Expand template variables ({{name}}, {{uid}}, {{auth_url:CHANNEL_ID}})
           const expandedContent = expandVariables(rule.response_content, friend as { id: string; display_name: string | null; user_id: string | null }, workerUrl);
-          const replyMsg = buildMessage(rule.response_type, expandedContent);
-          await lineClient.replyMessage(event.replyToken, [replyMsg]);
+
+          // Support multi-message: response_content can be JSON array of strings
+          // e.g. ["first bubble", "second bubble"] or just a plain string
+          let replyMessages: ReturnType<typeof buildMessage>[];
+          try {
+            const parsed = JSON.parse(expandedContent);
+            if (Array.isArray(parsed) && parsed.every((m: unknown) => typeof m === 'string')) {
+              replyMessages = parsed.map((text: string) => buildMessage('text', text));
+            } else {
+              replyMessages = [buildMessage(rule.response_type, expandedContent)];
+            }
+          } catch {
+            replyMessages = [buildMessage(rule.response_type, expandedContent)];
+          }
+          await lineClient.replyMessage(event.replyToken, replyMessages);
 
           // 送信ログ（replyMessage = 無料）
-          const outLogId = crypto.randomUUID();
-          await db
-            .prepare(
-              `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, delivery_type, created_at)
-               VALUES (?, ?, 'outgoing', ?, ?, NULL, NULL, 'reply', ?)`,
-            )
-            .bind(outLogId, friend.id, rule.response_type, rule.response_content, jstNow())
-            .run();
+          for (const _msg of replyMessages) {
+            const outLogId = crypto.randomUUID();
+            await db
+              .prepare(
+                `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, delivery_type, created_at)
+                 VALUES (?, ?, 'outgoing', ?, ?, NULL, NULL, 'reply', ?)`,
+              )
+              .bind(outLogId, friend.id, rule.response_type, rule.response_content, jstNow())
+              .run();
+          }
         } catch (err) {
           console.error('Failed to send auto-reply', err);
         }

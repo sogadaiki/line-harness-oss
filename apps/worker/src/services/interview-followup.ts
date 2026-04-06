@@ -18,8 +18,8 @@ const INTERVIEW_BOOKED_TAG = '面談予約済';
 const INTERVIEW_DONE_TAG = '面談完了';
 const INTERVIEW_BUTCH_TAG = '面談ブッチ';
 
-/** ブッチ判定: 翌日フォロー送信後48hを待つ（面談日時 + 翌日フォロー + 48h ≒ 面談日から3日後） */
-const BUTCH_THRESHOLD_HOURS = 72; // 面談日時から72h（3日）後にブッチ判定
+/** ブッチ判定: 面談日の翌日にチェック */
+const BUTCH_THRESHOLD_HOURS = 24; // 面談日時から24h後にブッチ判定
 
 export async function processInterviewButchDetection(
   db: D1Database,

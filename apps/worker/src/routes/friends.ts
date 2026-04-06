@@ -50,7 +50,7 @@ friends.get('/api/friends', async (c) => {
     const limit = Number(c.req.query('limit') ?? '50');
     const offset = Number(c.req.query('offset') ?? '0');
     const tagId = c.req.query('tagId');
-    const lineAccountId = c.req.query('lineAccountId');
+    const lineAccountId = c.req.query('lineAccountId') || c.get('scopedAccountId') as string | undefined;
 
     const db = c.env.DB;
 

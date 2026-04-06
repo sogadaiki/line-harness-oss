@@ -70,7 +70,7 @@ function serializeFriendScenario(row: DbFriendScenario) {
 // GET /api/scenarios - list all
 scenarios.get('/api/scenarios', async (c) => {
   try {
-    const lineAccountId = c.req.query('lineAccountId');
+    const lineAccountId = c.req.query('lineAccountId') || c.get('scopedAccountId') as string | undefined;
     let items: DbScenarioWithStepCount[];
     if (lineAccountId) {
       const result = await c.env.DB

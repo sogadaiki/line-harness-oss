@@ -15,7 +15,7 @@ const automations = new Hono<Env>();
 
 automations.get('/api/automations', async (c) => {
   try {
-    const lineAccountId = c.req.query('lineAccountId');
+    const lineAccountId = c.req.query('lineAccountId') || c.get('scopedAccountId') as string | undefined;
     let items;
     if (lineAccountId) {
       const result = await c.env.DB
@@ -37,6 +37,7 @@ automations.get('/api/automations', async (c) => {
         actions: JSON.parse(a.actions),
         isActive: Boolean(a.is_active),
         priority: a.priority,
+        lineAccountId: a.line_account_id ?? null,
         createdAt: a.created_at,
         updatedAt: a.updated_at,
       })),
@@ -66,6 +67,7 @@ automations.get('/api/automations/:id', async (c) => {
         actions: JSON.parse(item.actions),
         isActive: Boolean(item.is_active),
         priority: item.priority,
+        lineAccountId: item.line_account_id ?? null,
         createdAt: item.created_at,
         updatedAt: item.updated_at,
         logs: logs.map((l) => ({
@@ -125,8 +127,13 @@ automations.post('/api/automations', async (c) => {
 automations.put('/api/automations/:id', async (c) => {
   try {
     const id = c.req.param('id');
-    const body = await c.req.json();
+    const body = await c.req.json<Record<string, unknown>>();
     await updateAutomation(c.env.DB, id, body);
+    // Update line_account_id if provided (not in updateAutomation's supported fields)
+    if ('lineAccountId' in body) {
+      await c.env.DB.prepare(`UPDATE automations SET line_account_id = ? WHERE id = ?`)
+        .bind(body.lineAccountId ?? null, id).run();
+    }
     const updated = await getAutomationById(c.env.DB, id);
     if (!updated) return c.json({ success: false, error: 'Not found' }, 404);
     return c.json({
@@ -139,6 +146,7 @@ automations.put('/api/automations/:id', async (c) => {
         actions: JSON.parse(updated.actions),
         isActive: Boolean(updated.is_active),
         priority: updated.priority,
+        lineAccountId: updated.line_account_id ?? null,
       },
     });
   } catch (err) {

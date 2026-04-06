@@ -45,6 +45,7 @@ export type Env = {
     LINE_LOGIN_CHANNEL_ID: string;
     LINE_LOGIN_CHANNEL_SECRET: string;
     WORKER_URL: string;
+    SCOPED_LINE_ACCOUNT_ID?: string;
   };
 };
 

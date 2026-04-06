@@ -80,7 +80,7 @@ chats.get('/api/chats', async (c) => {
   try {
     const status = c.req.query('status') ?? undefined;
     const operatorId = c.req.query('operatorId') ?? undefined;
-    const lineAccountId = c.req.query('lineAccountId') ?? undefined;
+    const lineAccountId = c.req.query('lineAccountId') || c.get('scopedAccountId') as string | undefined;
 
     // JOIN friends to get display_name and picture_url
     let sql = `SELECT c.*, f.display_name, f.picture_url, f.line_user_id
