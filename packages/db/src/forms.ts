@@ -15,6 +15,7 @@ export interface Form {
   on_submit_webhook_url: string | null;
   on_submit_webhook_headers: string | null;
   on_submit_webhook_fail_message: string | null;
+  line_account_id: string | null;
   save_to_metadata: number;
   is_active: number;
   submit_count: number;
@@ -32,7 +33,14 @@ export interface FormSubmission {
 
 // ── CRUD ─────────────────────────────────────────────────────────────────────
 
-export async function getForms(db: D1Database): Promise<Form[]> {
+export async function getForms(db: D1Database, lineAccountId?: string): Promise<Form[]> {
+  if (lineAccountId) {
+    const result = await db
+      .prepare(`SELECT * FROM forms WHERE line_account_id = ? ORDER BY created_at DESC`)
+      .bind(lineAccountId)
+      .all<Form>();
+    return result.results;
+  }
   const result = await db
     .prepare(`SELECT * FROM forms ORDER BY created_at DESC`)
     .all<Form>();
@@ -57,6 +65,7 @@ export interface CreateFormInput {
   onSubmitWebhookUrl?: string | null;
   onSubmitWebhookHeaders?: string | null;
   onSubmitWebhookFailMessage?: string | null;
+  lineAccountId?: string | null;
   saveToMetadata?: boolean;
 }
 
@@ -70,8 +79,8 @@ export async function createForm(db: D1Database, input: CreateFormInput): Promis
          (id, name, description, fields, on_submit_tag_id, on_submit_scenario_id,
           on_submit_message_type, on_submit_message_content,
           on_submit_webhook_url, on_submit_webhook_headers, on_submit_webhook_fail_message,
-          save_to_metadata, is_active, submit_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
+          line_account_id, save_to_metadata, is_active, submit_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
     )
     .bind(
       id,
@@ -85,6 +94,7 @@ export async function createForm(db: D1Database, input: CreateFormInput): Promis
       input.onSubmitWebhookUrl ?? null,
       input.onSubmitWebhookHeaders ?? null,
       input.onSubmitWebhookFailMessage ?? null,
+      input.lineAccountId ?? null,
       input.saveToMetadata !== false ? 1 : 0,
       now,
       now,

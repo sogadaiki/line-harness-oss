@@ -8,6 +8,7 @@ import {
   getNotifications,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
 
 const notifications = new Hono<Env>();
 
@@ -15,17 +16,8 @@ const notifications = new Hono<Env>();
 
 notifications.get('/api/notifications/rules', async (c) => {
   try {
-    const lineAccountId = c.req.query('lineAccountId');
-    let items;
-    if (lineAccountId) {
-      const result = await c.env.DB
-        .prepare(`SELECT * FROM notification_rules WHERE line_account_id = ? ORDER BY created_at DESC`)
-        .bind(lineAccountId)
-        .all();
-      items = result.results as unknown as Awaited<ReturnType<typeof getNotificationRules>>;
-    } else {
-      items = await getNotificationRules(c.env.DB);
-    }
+    const lineAccountId = getScope(c);
+    const items = await getNotificationRules(c.env.DB, lineAccountId);
     return c.json({
       success: true,
       data: items.map((r) => ({
@@ -71,7 +63,8 @@ notifications.post('/api/notifications/rules', async (c) => {
   try {
     const body = await c.req.json<{ name: string; eventType: string; conditions?: Record<string, unknown>; channels?: string[] }>();
     if (!body.name || !body.eventType) return c.json({ success: false, error: 'name and eventType are required' }, 400);
-    const item = await createNotificationRule(c.env.DB, body);
+    const lineAccountId = getScope(c);
+    const item = await createNotificationRule(c.env.DB, { ...body, lineAccountId });
     return c.json({
       success: true,
       data: { id: item.id, name: item.name, eventType: item.event_type, channels: JSON.parse(item.channels), createdAt: item.created_at },
@@ -115,7 +108,7 @@ notifications.get('/api/notifications', async (c) => {
   try {
     const status = c.req.query('status') ?? undefined;
     const limit = Number(c.req.query('limit') ?? '100');
-    const lineAccountId = c.req.query('lineAccountId') ?? undefined;
+    const lineAccountId = getScope(c);
     let items;
     if (lineAccountId) {
       const conditions: string[] = ['line_account_id = ?'];

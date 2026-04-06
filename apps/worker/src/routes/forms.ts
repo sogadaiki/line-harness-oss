@@ -13,6 +13,7 @@ import { getFriendByLineUserId, getFriendById } from '@line-crm/db';
 import { addTagToFriend, enrollFriendInScenario } from '@line-crm/db';
 import type { Form as DbForm, FormSubmission as DbFormSubmission } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
 
 const forms = new Hono<Env>();
 
@@ -51,7 +52,8 @@ function serializeSubmission(row: DbFormSubmission & { friend_name?: string | nu
 // GET /api/forms — list all forms
 forms.get('/api/forms', async (c) => {
   try {
-    const items = await getForms(c.env.DB);
+    const lineAccountId = getScope(c);
+    const items = await getForms(c.env.DB, lineAccountId);
     return c.json({ success: true, data: items.map(serializeForm) });
   } catch (err) {
     console.error('GET /api/forms error:', err);
@@ -95,6 +97,7 @@ forms.post('/api/forms', async (c) => {
       return c.json({ success: false, error: 'name is required' }, 400);
     }
 
+    const lineAccountId = getScope(c);
     const form = await createForm(c.env.DB, {
       name: body.name,
       description: body.description ?? null,
@@ -106,6 +109,7 @@ forms.post('/api/forms', async (c) => {
       onSubmitWebhookUrl: body.onSubmitWebhookUrl ?? null,
       onSubmitWebhookHeaders: body.onSubmitWebhookHeaders ?? null,
       onSubmitWebhookFailMessage: body.onSubmitWebhookFailMessage ?? null,
+      lineAccountId,
       saveToMetadata: body.saveToMetadata,
     });
 

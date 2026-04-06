@@ -8,6 +8,7 @@ export interface ConversionPoint {
   name: string;
   event_type: string;
   value: number | null;
+  line_account_id: string | null;
   created_at: string;
 }
 
@@ -23,7 +24,14 @@ export interface ConversionEvent {
 
 // ── Conversion Points CRUD ──────────────────────────────────────────────────
 
-export async function getConversionPoints(db: D1Database): Promise<ConversionPoint[]> {
+export async function getConversionPoints(db: D1Database, lineAccountId?: string): Promise<ConversionPoint[]> {
+  if (lineAccountId) {
+    const result = await db
+      .prepare(`SELECT * FROM conversion_points WHERE line_account_id = ? ORDER BY created_at DESC`)
+      .bind(lineAccountId)
+      .all<ConversionPoint>();
+    return result.results;
+  }
   const result = await db
     .prepare(`SELECT * FROM conversion_points ORDER BY created_at DESC`)
     .all<ConversionPoint>();
@@ -44,6 +52,7 @@ export interface CreateConversionPointInput {
   name: string;
   eventType: string;
   value?: number | null;
+  lineAccountId?: string | null;
 }
 
 export async function createConversionPoint(
@@ -55,10 +64,10 @@ export async function createConversionPoint(
 
   await db
     .prepare(
-      `INSERT INTO conversion_points (id, name, event_type, value, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO conversion_points (id, name, event_type, value, line_account_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, input.name, input.eventType, input.value ?? null, now)
+    .bind(id, input.name, input.eventType, input.value ?? null, input.lineAccountId ?? null, now)
     .run();
 
   return (await getConversionPointById(db, id))!;

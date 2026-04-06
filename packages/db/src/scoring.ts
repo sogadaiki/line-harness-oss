@@ -6,6 +6,7 @@ export interface ScoringRuleRow {
   name: string;
   event_type: string;
   score_value: number;
+  line_account_id: string | null;
   is_active: number;
   created_at: string;
   updated_at: string;
@@ -22,7 +23,11 @@ export interface FriendScoreRow {
 
 // --- スコアリングルール ---
 
-export async function getScoringRules(db: D1Database): Promise<ScoringRuleRow[]> {
+export async function getScoringRules(db: D1Database, lineAccountId?: string): Promise<ScoringRuleRow[]> {
+  if (lineAccountId) {
+    const result = await db.prepare(`SELECT * FROM scoring_rules WHERE line_account_id = ? ORDER BY created_at DESC`).bind(lineAccountId).all<ScoringRuleRow>();
+    return result.results;
+  }
   const result = await db.prepare(`SELECT * FROM scoring_rules ORDER BY created_at DESC`).all<ScoringRuleRow>();
   return result.results;
 }
@@ -33,12 +38,12 @@ export async function getScoringRuleById(db: D1Database, id: string): Promise<Sc
 
 export async function createScoringRule(
   db: D1Database,
-  input: { name: string; eventType: string; scoreValue: number },
+  input: { name: string; eventType: string; scoreValue: number; lineAccountId?: string | null },
 ): Promise<ScoringRuleRow> {
   const id = crypto.randomUUID();
   const now = jstNow();
-  await db.prepare(`INSERT INTO scoring_rules (id, name, event_type, score_value, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
-    .bind(id, input.name, input.eventType, input.scoreValue, now, now).run();
+  await db.prepare(`INSERT INTO scoring_rules (id, name, event_type, score_value, line_account_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, input.name, input.eventType, input.scoreValue, input.lineAccountId ?? null, now, now).run();
   return (await getScoringRuleById(db, id))!;
 }
 

@@ -7,17 +7,24 @@ export interface TemplateRow {
   category: string;
   message_type: string;
   message_content: string;
+  line_account_id: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export async function getTemplates(db: D1Database, category?: string): Promise<TemplateRow[]> {
+export async function getTemplates(db: D1Database, category?: string, lineAccountId?: string): Promise<TemplateRow[]> {
+  const conditions: string[] = [];
+  const binds: unknown[] = [];
   if (category) {
-    const result = await db.prepare(`SELECT * FROM templates WHERE category = ? ORDER BY created_at DESC`)
-      .bind(category).all<TemplateRow>();
-    return result.results;
+    conditions.push('category = ?');
+    binds.push(category);
   }
-  const result = await db.prepare(`SELECT * FROM templates ORDER BY created_at DESC`).all<TemplateRow>();
+  if (lineAccountId) {
+    conditions.push('line_account_id = ?');
+    binds.push(lineAccountId);
+  }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const result = await db.prepare(`SELECT * FROM templates ${where} ORDER BY created_at DESC`).bind(...binds).all<TemplateRow>();
   return result.results;
 }
 
@@ -27,12 +34,12 @@ export async function getTemplateById(db: D1Database, id: string): Promise<Templ
 
 export async function createTemplate(
   db: D1Database,
-  input: { name: string; category?: string; messageType: string; messageContent: string },
+  input: { name: string; category?: string; messageType: string; messageContent: string; lineAccountId?: string | null },
 ): Promise<TemplateRow> {
   const id = crypto.randomUUID();
   const now = jstNow();
-  await db.prepare(`INSERT INTO templates (id, name, category, message_type, message_content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .bind(id, input.name, input.category ?? 'general', input.messageType, input.messageContent, now, now).run();
+  await db.prepare(`INSERT INTO templates (id, name, category, message_type, message_content, line_account_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, input.name, input.category ?? 'general', input.messageType, input.messageContent, input.lineAccountId ?? null, now, now).run();
   return (await getTemplateById(db, id))!;
 }
 

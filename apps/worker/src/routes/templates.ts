@@ -7,13 +7,15 @@ import {
   deleteTemplate,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
 
 const templates = new Hono<Env>();
 
 templates.get('/api/templates', async (c) => {
   try {
     const category = c.req.query('category') ?? undefined;
-    const items = await getTemplates(c.env.DB, category);
+    const lineAccountId = getScope(c);
+    const items = await getTemplates(c.env.DB, category, lineAccountId);
     return c.json({
       success: true,
       data: items.map((t) => ({
@@ -52,7 +54,8 @@ templates.post('/api/templates', async (c) => {
     if (!body.name || !body.messageType || !body.messageContent) {
       return c.json({ success: false, error: 'name, messageType, messageContent are required' }, 400);
     }
-    const item = await createTemplate(c.env.DB, body);
+    const lineAccountId = getScope(c);
+    const item = await createTemplate(c.env.DB, { ...body, lineAccountId });
     return c.json({ success: true, data: { id: item.id, name: item.name, category: item.category, messageType: item.message_type, createdAt: item.created_at } }, 201);
   } catch (err) {
     console.error('POST /api/templates error:', err);

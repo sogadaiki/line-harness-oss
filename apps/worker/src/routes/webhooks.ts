@@ -12,6 +12,7 @@ import {
   deleteOutgoingWebhook,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
 
 const webhooks = new Hono<Env>();
 
@@ -19,7 +20,8 @@ const webhooks = new Hono<Env>();
 
 webhooks.get('/api/webhooks/incoming', async (c) => {
   try {
-    const items = await getIncomingWebhooks(c.env.DB);
+    const lineAccountId = getScope(c);
+    const items = await getIncomingWebhooks(c.env.DB, lineAccountId);
     return c.json({
       success: true,
       data: items.map((w) => ({
@@ -42,7 +44,8 @@ webhooks.post('/api/webhooks/incoming', async (c) => {
   try {
     const body = await c.req.json<{ name: string; sourceType?: string; secret?: string }>();
     if (!body.name) return c.json({ success: false, error: 'name is required' }, 400);
-    const item = await createIncomingWebhook(c.env.DB, body);
+    const lineAccountId = getScope(c);
+    const item = await createIncomingWebhook(c.env.DB, { ...body, lineAccountId });
     return c.json({ success: true, data: { id: item.id, name: item.name, sourceType: item.source_type, isActive: Boolean(item.is_active), createdAt: item.created_at } }, 201);
   } catch (err) {
     console.error('POST /api/webhooks/incoming error:', err);
@@ -78,7 +81,8 @@ webhooks.delete('/api/webhooks/incoming/:id', async (c) => {
 
 webhooks.get('/api/webhooks/outgoing', async (c) => {
   try {
-    const items = await getOutgoingWebhooks(c.env.DB);
+    const lineAccountId = getScope(c);
+    const items = await getOutgoingWebhooks(c.env.DB, lineAccountId);
     return c.json({
       success: true,
       data: items.map((w) => ({
@@ -102,7 +106,8 @@ webhooks.post('/api/webhooks/outgoing', async (c) => {
   try {
     const body = await c.req.json<{ name: string; url: string; eventTypes: string[]; secret?: string }>();
     if (!body.name || !body.url) return c.json({ success: false, error: 'name and url are required' }, 400);
-    const item = await createOutgoingWebhook(c.env.DB, { ...body, eventTypes: body.eventTypes ?? [] });
+    const lineAccountId = getScope(c);
+    const item = await createOutgoingWebhook(c.env.DB, { ...body, eventTypes: body.eventTypes ?? [], lineAccountId });
     return c.json({
       success: true,
       data: { id: item.id, name: item.name, url: item.url, eventTypes: JSON.parse(item.event_types), isActive: Boolean(item.is_active), createdAt: item.created_at },

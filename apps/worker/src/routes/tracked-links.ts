@@ -11,6 +11,7 @@ import {
 import { addTagToFriend, enrollFriendInScenario } from '@line-crm/db';
 import type { TrackedLink } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
 
 const trackedLinks = new Hono<Env>();
 
@@ -38,7 +39,8 @@ function getBaseUrl(c: { req: { url: string } }): string {
 // GET /api/tracked-links — list all
 trackedLinks.get('/api/tracked-links', async (c) => {
   try {
-    const items = await getTrackedLinks(c.env.DB);
+    const lineAccountId = getScope(c);
+    const items = await getTrackedLinks(c.env.DB, lineAccountId);
     const base = getBaseUrl(c);
     return c.json({ success: true, data: items.map((item) => serializeTrackedLink(item, base)) });
   } catch (err) {
@@ -89,11 +91,13 @@ trackedLinks.post('/api/tracked-links', async (c) => {
       return c.json({ success: false, error: 'name and originalUrl are required' }, 400);
     }
 
+    const lineAccountId = getScope(c);
     const link = await createTrackedLink(c.env.DB, {
       name: body.name,
       originalUrl: body.originalUrl,
       tagId: body.tagId ?? null,
       scenarioId: body.scenarioId ?? null,
+      lineAccountId,
     });
 
     const base = getBaseUrl(c);

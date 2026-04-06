@@ -9,6 +9,7 @@ import {
   getConversionReport,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
 
 const conversions = new Hono<Env>();
 
@@ -17,7 +18,8 @@ const conversions = new Hono<Env>();
 // GET /api/conversions/points - list all
 conversions.get('/api/conversions/points', async (c) => {
   try {
-    const items = await getConversionPoints(c.env.DB);
+    const lineAccountId = getScope(c);
+    const items = await getConversionPoints(c.env.DB, lineAccountId);
     return c.json({
       success: true,
       data: items.map((p) => ({
@@ -47,7 +49,8 @@ conversions.post('/api/conversions/points', async (c) => {
       return c.json({ success: false, error: 'name and eventType are required' }, 400);
     }
 
-    const point = await createConversionPoint(c.env.DB, body);
+    const lineAccountId = getScope(c);
+    const point = await createConversionPoint(c.env.DB, { ...body, lineAccountId });
     return c.json({
       success: true,
       data: {

@@ -10,6 +10,7 @@ import {
   addScore,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
 
 const scoring = new Hono<Env>();
 
@@ -17,7 +18,8 @@ const scoring = new Hono<Env>();
 
 scoring.get('/api/scoring-rules', async (c) => {
   try {
-    const items = await getScoringRules(c.env.DB);
+    const lineAccountId = getScope(c);
+    const items = await getScoringRules(c.env.DB, lineAccountId);
     return c.json({
       success: true,
       data: items.map((r) => ({
@@ -56,7 +58,8 @@ scoring.post('/api/scoring-rules', async (c) => {
     if (!body.name || !body.eventType || body.scoreValue === undefined) {
       return c.json({ success: false, error: 'name, eventType, scoreValue are required' }, 400);
     }
-    const item = await createScoringRule(c.env.DB, body);
+    const lineAccountId = getScope(c);
+    const item = await createScoringRule(c.env.DB, { ...body, lineAccountId });
     return c.json({ success: true, data: { id: item.id, name: item.name, eventType: item.event_type, scoreValue: item.score_value } }, 201);
   } catch (err) {
     console.error('POST /api/scoring-rules error:', err);

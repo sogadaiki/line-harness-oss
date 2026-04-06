@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { getTags, createTag, deleteTag } from '@line-crm/db';
 import type { Tag as DbTag } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
 
 const tags = new Hono<Env>();
 
@@ -17,7 +18,8 @@ function serializeTag(row: DbTag) {
 // GET /api/tags - list all tags
 tags.get('/api/tags', async (c) => {
   try {
-    const items = await getTags(c.env.DB);
+    const lineAccountId = getScope(c);
+    const items = await getTags(c.env.DB, lineAccountId);
     return c.json({ success: true, data: items.map(serializeTag) });
   } catch (err) {
     console.error('GET /api/tags error:', err);
@@ -34,9 +36,11 @@ tags.post('/api/tags', async (c) => {
       return c.json({ success: false, error: 'name is required' }, 400);
     }
 
+    const lineAccountId = getScope(c);
     const tag = await createTag(c.env.DB, {
       name: body.name,
       color: body.color,
+      lineAccountId,
     });
 
     return c.json({ success: true, data: serializeTag(tag) }, 201);

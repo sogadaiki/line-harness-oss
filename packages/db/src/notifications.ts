@@ -27,7 +27,11 @@ export interface NotificationRow {
 
 // --- 通知ルール ---
 
-export async function getNotificationRules(db: D1Database): Promise<NotificationRuleRow[]> {
+export async function getNotificationRules(db: D1Database, lineAccountId?: string): Promise<NotificationRuleRow[]> {
+  if (lineAccountId) {
+    const result = await db.prepare(`SELECT * FROM notification_rules WHERE line_account_id = ? ORDER BY created_at DESC`).bind(lineAccountId).all<NotificationRuleRow>();
+    return result.results;
+  }
   const result = await db.prepare(`SELECT * FROM notification_rules ORDER BY created_at DESC`).all<NotificationRuleRow>();
   return result.results;
 }
@@ -38,12 +42,12 @@ export async function getNotificationRuleById(db: D1Database, id: string): Promi
 
 export async function createNotificationRule(
   db: D1Database,
-  input: { name: string; eventType: string; conditions?: Record<string, unknown>; channels?: string[] },
+  input: { name: string; eventType: string; conditions?: Record<string, unknown>; channels?: string[]; lineAccountId?: string | null },
 ): Promise<NotificationRuleRow> {
   const id = crypto.randomUUID();
   const now = jstNow();
-  await db.prepare(`INSERT INTO notification_rules (id, name, event_type, conditions, channels, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .bind(id, input.name, input.eventType, JSON.stringify(input.conditions ?? {}), JSON.stringify(input.channels ?? ['dashboard']), now, now).run();
+  await db.prepare(`INSERT INTO notification_rules (id, name, event_type, conditions, channels, line_account_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, input.name, input.eventType, JSON.stringify(input.conditions ?? {}), JSON.stringify(input.channels ?? ['dashboard']), input.lineAccountId ?? null, now, now).run();
   return (await getNotificationRuleById(db, id))!;
 }
 

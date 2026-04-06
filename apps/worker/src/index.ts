@@ -63,6 +63,7 @@ export type Env = {
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
+    scopedAccountId: string | undefined;
   };
 };
 

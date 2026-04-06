@@ -5,11 +5,19 @@ export interface MessageTemplate {
   name: string;
   message_type: 'text' | 'flex';
   message_content: string;
+  line_account_id: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export async function listMessageTemplates(db: D1Database): Promise<MessageTemplate[]> {
+export async function listMessageTemplates(db: D1Database, lineAccountId?: string): Promise<MessageTemplate[]> {
+  if (lineAccountId) {
+    const result = await db
+      .prepare('SELECT * FROM message_templates WHERE line_account_id = ? ORDER BY name ASC')
+      .bind(lineAccountId)
+      .all<MessageTemplate>();
+    return result.results;
+  }
   const result = await db
     .prepare('SELECT * FROM message_templates ORDER BY name ASC')
     .all<MessageTemplate>();
@@ -30,6 +38,7 @@ export interface CreateMessageTemplateInput {
   name: string;
   messageType: 'text' | 'flex';
   messageContent: string;
+  lineAccountId?: string | null;
 }
 
 export async function createMessageTemplate(
@@ -40,9 +49,9 @@ export async function createMessageTemplate(
   const now = jstNow();
   const result = await db
     .prepare(
-      'INSERT INTO message_templates (id, name, message_type, message_content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING *',
+      'INSERT INTO message_templates (id, name, message_type, message_content, line_account_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING *',
     )
-    .bind(id, input.name, input.messageType, input.messageContent, now, now)
+    .bind(id, input.name, input.messageType, input.messageContent, input.lineAccountId ?? null, now, now)
     .first<MessageTemplate>();
   return result!;
 }

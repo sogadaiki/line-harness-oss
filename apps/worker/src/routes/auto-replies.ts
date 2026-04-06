@@ -8,6 +8,7 @@ import {
 } from '@line-crm/db';
 import type { AutoReply as DbAutoReply } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
 
 const autoReplies = new Hono<Env>();
 
@@ -27,7 +28,7 @@ function serializeAutoReply(row: DbAutoReply) {
 // GET /api/auto-replies — list all auto-replies (optional ?accountId filter)
 autoReplies.get('/api/auto-replies', async (c) => {
   try {
-    const accountId = c.req.query('accountId');
+    const accountId = getScope(c) || c.req.query('accountId');
     const items = await getAutoReplies(c.env.DB, accountId || undefined);
     return c.json({ success: true, data: items.map(serializeAutoReply) });
   } catch (err) {

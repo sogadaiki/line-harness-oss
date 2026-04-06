@@ -8,6 +8,7 @@ import {
 } from '@line-crm/db';
 import type { MessageTemplate } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
 
 const messageTemplates = new Hono<Env>();
 
@@ -25,7 +26,8 @@ function serialize(t: MessageTemplate) {
 // GET /api/message-templates — list all
 messageTemplates.get('/api/message-templates', async (c) => {
   try {
-    const templates = await listMessageTemplates(c.env.DB);
+    const lineAccountId = getScope(c);
+    const templates = await listMessageTemplates(c.env.DB, lineAccountId);
     return c.json({ success: true, data: templates.map(serialize) });
   } catch (err) {
     console.error('GET /api/message-templates error:', err);
@@ -71,10 +73,12 @@ messageTemplates.post('/api/message-templates', async (c) => {
       }
     }
 
+    const lineAccountId = getScope(c);
     const t = await createMessageTemplate(c.env.DB, {
       name: body.name,
       messageType: body.messageType,
       messageContent: body.messageContent,
+      lineAccountId,
     });
     return c.json({ success: true, data: serialize(t) }, 201);
   } catch (err) {

@@ -12,6 +12,7 @@ import { processBroadcastSend } from '../services/broadcast.js';
 import { processSegmentSend } from '../services/segment-send.js';
 import type { SegmentCondition } from '../services/segment-query.js';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
 
 const broadcasts = new Hono<Env>();
 
@@ -39,7 +40,7 @@ function serializeBroadcast(row: DbBroadcast) {
 // GET /api/broadcasts - list all
 broadcasts.get('/api/broadcasts', async (c) => {
   try {
-    const lineAccountId = c.req.query('lineAccountId');
+    const lineAccountId = getScope(c);
     let items: DbBroadcast[];
     if (lineAccountId) {
       const result = await c.env.DB

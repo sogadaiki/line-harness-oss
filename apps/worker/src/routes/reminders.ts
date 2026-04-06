@@ -13,6 +13,7 @@ import {
   cancelFriendReminder,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
 
 const reminders = new Hono<Env>();
 
@@ -20,7 +21,7 @@ const reminders = new Hono<Env>();
 
 reminders.get('/api/reminders', async (c) => {
   try {
-    const lineAccountId = c.req.query('lineAccountId');
+    const lineAccountId = getScope(c);
     let items: Awaited<ReturnType<typeof getReminders>>;
     if (lineAccountId) {
       const result = await c.env.DB

@@ -35,22 +35,25 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
 
   const token = authHeader.slice('Bearer '.length);
 
+  // Set account scope for all auth paths (tenant-isolated Workers like hinatama)
+  const applyScope = () => {
+    if (c.env.SCOPED_LINE_ACCOUNT_ID) {
+      c.set('scopedAccountId', c.env.SCOPED_LINE_ACCOUNT_ID);
+    }
+  };
+
   // Check staff_members table first
   const staff = await getStaffByApiKey(c.env.DB, token);
   if (staff) {
     c.set('staff', { id: staff.id, name: staff.name, role: staff.role });
+    applyScope();
     return next();
   }
 
   // Fallback: env API_KEY acts as owner
   if (token === c.env.API_KEY) {
     c.set('staff', { id: 'env-owner', name: 'Owner', role: 'owner' as const });
-
-    // Set account scope if configured (for tenant-isolated Workers like hinatama)
-    if (c.env.SCOPED_LINE_ACCOUNT_ID) {
-      c.set('scopedAccountId', c.env.SCOPED_LINE_ACCOUNT_ID);
-    }
-
+    applyScope();
     return next();
   }
 

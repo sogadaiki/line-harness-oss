@@ -9,6 +9,7 @@ export interface TrackedLink {
   original_url: string;
   tag_id: string | null;
   scenario_id: string | null;
+  line_account_id: string | null;
   is_active: number;
   click_count: number;
   created_at: string;
@@ -24,7 +25,14 @@ export interface LinkClick {
 
 // ── CRUD ─────────────────────────────────────────────────────────────────────
 
-export async function getTrackedLinks(db: D1Database): Promise<TrackedLink[]> {
+export async function getTrackedLinks(db: D1Database, lineAccountId?: string): Promise<TrackedLink[]> {
+  if (lineAccountId) {
+    const result = await db
+      .prepare(`SELECT * FROM tracked_links WHERE line_account_id = ? ORDER BY created_at DESC`)
+      .bind(lineAccountId)
+      .all<TrackedLink>();
+    return result.results;
+  }
   const result = await db
     .prepare(`SELECT * FROM tracked_links ORDER BY created_at DESC`)
     .all<TrackedLink>();
@@ -46,6 +54,7 @@ export interface CreateTrackedLinkInput {
   originalUrl: string;
   tagId?: string | null;
   scenarioId?: string | null;
+  lineAccountId?: string | null;
 }
 
 export async function createTrackedLink(
@@ -57,10 +66,10 @@ export async function createTrackedLink(
 
   await db
     .prepare(
-      `INSERT INTO tracked_links (id, name, original_url, tag_id, scenario_id, is_active, click_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?)`,
+      `INSERT INTO tracked_links (id, name, original_url, tag_id, scenario_id, line_account_id, is_active, click_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
     )
-    .bind(id, input.name, input.originalUrl, input.tagId ?? null, input.scenarioId ?? null, now, now)
+    .bind(id, input.name, input.originalUrl, input.tagId ?? null, input.scenarioId ?? null, input.lineAccountId ?? null, now, now)
     .run();
 
   return (await getTrackedLinkById(db, id))!;
