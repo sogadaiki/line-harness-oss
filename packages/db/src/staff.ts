@@ -7,6 +7,10 @@ export interface StaffMember {
   role: 'owner' | 'admin' | 'staff';
   api_key: string;
   is_active: number;
+  line_user_id: string | null;
+  permissions: string | null;
+  invite_token: string | null;
+  invite_expires_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -134,4 +138,89 @@ export async function countActiveStaffByRole(db: D1Database, role: string): Prom
     .bind(role)
     .first<{ count: number }>();
   return result?.count ?? 0;
+}
+
+export async function getStaffByLineUserId(
+  db: D1Database,
+  lineUserId: string,
+): Promise<StaffMember | null> {
+  return db
+    .prepare('SELECT * FROM staff_members WHERE line_user_id = ? AND is_active = 1')
+    .bind(lineUserId)
+    .first<StaffMember>();
+}
+
+export async function setStaffLineUserId(
+  db: D1Database,
+  staffId: string,
+  lineUserId: string,
+): Promise<void> {
+  const now = jstNow();
+  await db
+    .prepare('UPDATE staff_members SET line_user_id = ?, updated_at = ? WHERE id = ?')
+    .bind(lineUserId, now, staffId)
+    .run();
+}
+
+export async function createInviteToken(
+  db: D1Database,
+  staffId: string,
+): Promise<string> {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  const token = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+  const now = jstNow();
+  // 24h expiry
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+  await db
+    .prepare(
+      'UPDATE staff_members SET invite_token = ?, invite_expires_at = ?, updated_at = ? WHERE id = ?',
+    )
+    .bind(token, expiresAt, now, staffId)
+    .run();
+  return token;
+}
+
+export async function getStaffByInviteToken(
+  db: D1Database,
+  token: string,
+): Promise<StaffMember | null> {
+  const staff = await db
+    .prepare('SELECT * FROM staff_members WHERE invite_token = ? AND is_active = 1')
+    .bind(token)
+    .first<StaffMember>();
+  if (!staff) return null;
+  // Check expiry
+  if (staff.invite_expires_at && new Date(staff.invite_expires_at).getTime() < Date.now()) {
+    return null;
+  }
+  return staff;
+}
+
+/** Default permissions by role */
+const DEFAULT_PERMISSIONS: Record<string, string[]> = {
+  owner: ['*'],
+  admin: ['friends', 'chats', 'scenarios', 'broadcasts', 'templates', 'reminders', 'automations', 'webhooks', 'notifications', 'scoring', 'conversions', 'affiliates', 'forms', 'accounts'],
+  staff: ['friends', 'chats', 'scenarios', 'broadcasts', 'templates'],
+};
+
+export function getStaffPermissions(staff: StaffMember): string[] {
+  // If custom permissions JSON is set, use it
+  if (staff.permissions) {
+    const parsed = JSON.parse(staff.permissions) as string[];
+    return parsed;
+  }
+  // Otherwise, derive from role
+  return DEFAULT_PERMISSIONS[staff.role] ?? [];
+}
+
+export async function clearInviteToken(
+  db: D1Database,
+  staffId: string,
+): Promise<void> {
+  const now = jstNow();
+  await db
+    .prepare('UPDATE staff_members SET invite_token = NULL, invite_expires_at = NULL, updated_at = ? WHERE id = ?')
+    .bind(now, staffId)
+    .run();
 }

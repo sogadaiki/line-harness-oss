@@ -1,6 +1,12 @@
 import type { Context, Next } from 'hono';
-import { getStaffByApiKey } from '@line-crm/db';
+import { getStaffByApiKey, getStaffById } from '@line-crm/db';
+import { verifyJwt } from '../utils/jwt.js';
 import type { Env } from '../index.js';
+
+function parseCookie(header: string, name: string): string | null {
+  const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return match ? match[1] : null;
+}
 
 export async function authMiddleware(c: Context<Env>, next: Next): Promise<Response | void> {
   // Skip auth for the LINE webhook endpoint — it uses signature verification instead
@@ -23,17 +29,11 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path.match(/^\/api\/forms\/[^/]+\/submit$/) ||
     path.match(/^\/api\/forms\/[^/]+$/) || // GET form definition (public for LIFF)
     path === '/api/meet-callback' || // Meet Harness completion callback
-    path === '/api/qr' // Public QR proxy — used by desktop landing pages
+    path === '/api/qr' || // Public QR proxy — used by desktop landing pages
+    path === '/api/auth/logout' // Logout clears cookie, no auth needed
   ) {
     return next();
   }
-
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return c.json({ success: false, error: 'Unauthorized' }, 401);
-  }
-
-  const token = authHeader.slice('Bearer '.length);
 
   // Set account scope for all auth paths (tenant-isolated Workers like hinatama)
   const applyScope = () => {
@@ -42,19 +42,42 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     }
   };
 
-  // Check staff_members table first
-  const staff = await getStaffByApiKey(c.env.DB, token);
-  if (staff) {
-    c.set('staff', { id: staff.id, name: staff.name, role: staff.role });
-    applyScope();
-    return next();
+  // Strategy 1: Bearer token (existing API key auth)
+  const authHeader = c.req.header('Authorization');
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice('Bearer '.length);
+
+    // Check staff_members table first
+    const staff = await getStaffByApiKey(c.env.DB, token);
+    if (staff) {
+      c.set('staff', { id: staff.id, name: staff.name, role: staff.role });
+      applyScope();
+      return next();
+    }
+
+    // Fallback: env API_KEY acts as owner
+    if (token === c.env.API_KEY) {
+      c.set('staff', { id: 'env-owner', name: 'Owner', role: 'owner' as const });
+      applyScope();
+      return next();
+    }
   }
 
-  // Fallback: env API_KEY acts as owner
-  if (token === c.env.API_KEY) {
-    c.set('staff', { id: 'env-owner', name: 'Owner', role: 'owner' as const });
-    applyScope();
-    return next();
+  // Strategy 2: Cookie JWT session
+  const cookieHeader = c.req.header('Cookie') || '';
+  const sessionToken = parseCookie(cookieHeader, 'lh_session');
+  if (sessionToken) {
+    const secret = c.env.SESSION_SECRET || c.env.API_KEY;
+    const payload = await verifyJwt(sessionToken, secret);
+    if (payload) {
+      // Verify staff still exists and is active
+      const staff = await getStaffById(c.env.DB, payload.staffId);
+      if (staff && staff.is_active) {
+        c.set('staff', { id: staff.id, name: staff.name, role: staff.role });
+        applyScope();
+        return next();
+      }
+    }
   }
 
   return c.json({ success: false, error: 'Unauthorized' }, 401);

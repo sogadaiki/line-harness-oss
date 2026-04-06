@@ -62,13 +62,19 @@ function getApiKey(): string {
 }
 
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+  const apiKey = getApiKey()
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...options?.headers as Record<string, string>,
+  }
+  // Only add Bearer token if API key auth is in use
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`
+  }
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${getApiKey()}`,
-      ...options?.headers,
-    },
+    credentials: 'include',
+    headers,
   })
   if (!res.ok) throw new Error(`API error: ${res.status}`)
   return res.json() as Promise<T>
@@ -523,5 +529,9 @@ export const api = {
       fetchApi<ApiResponse<null>>(`/api/staff/${id}`, { method: 'DELETE' }),
     regenerateKey: (id: string) =>
       fetchApi<ApiResponse<{ apiKey: string }>>(`/api/staff/${id}/regenerate-key`, { method: 'POST' }),
+    invite: (id: string) =>
+      fetchApi<ApiResponse<{ inviteUrl: string; expiresIn: string }>>(`/api/staff/${id}/invite`, { method: 'POST' }),
+    permissions: () =>
+      fetchApi<ApiResponse<{ permissions: string[] }>>('/api/staff/me/permissions'),
   },
 }

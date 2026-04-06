@@ -253,10 +253,22 @@ export default function Sidebar() {
         <div className="px-6 py-4 space-y-3">
         <p className="text-xs text-gray-400">LINE Harness v{process.env.APP_VERSION || '0.0.0'}</p>
         <button
-          onClick={() => {
+          onClick={async () => {
+            // Clear cookie session via API
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
+            try {
+              await fetch(`${apiUrl}/api/auth/logout`, {
+                method: 'POST',
+                credentials: 'include',
+              })
+            } catch {
+              // Best-effort cookie clear
+            }
             localStorage.removeItem('lh_api_key')
             localStorage.removeItem('lh_staff_name')
             localStorage.removeItem('lh_staff_role')
+            localStorage.removeItem('lh_auth_type')
+            localStorage.removeItem('lh_permissions')
             window.location.href = '/login'
           }}
           className="flex items-center gap-2 text-xs text-gray-400 hover:text-red-500 transition-colors"

@@ -44,6 +44,7 @@ import { autoReplies } from './routes/auto-replies.js';
 import { trafficPools } from './routes/traffic-pools.js';
 import { meetCallback } from './routes/meet-callback.js';
 import { messageTemplates } from './routes/message-templates.js';
+import { auth as authRoutes } from './routes/auth.js';
 
 export type Env = {
   Bindings: {
@@ -58,6 +59,7 @@ export type Env = {
     LINE_LOGIN_CHANNEL_ID: string;
     LINE_LOGIN_CHANNEL_SECRET: string;
     WORKER_URL: string;
+    SESSION_SECRET?: string;
     SCOPED_LINE_ACCOUNT_ID?: string;
     X_HARNESS_URL?: string;
   };
@@ -69,8 +71,11 @@ export type Env = {
 
 const app = new Hono<Env>();
 
-// CORS — allow all origins for MVP
-app.use('*', cors({ origin: '*' }));
+// CORS — reflect request origin to support credentials (cookies)
+app.use('*', cors({
+  origin: (origin) => origin || '*',
+  credentials: true,
+}));
 
 // Rate limiting — runs before auth to block abuse early
 app.use('*', rateLimitMiddleware);
@@ -113,6 +118,7 @@ app.route('/', autoReplies);
 app.route('/', trafficPools);
 app.route('/', meetCallback);
 app.route('/', messageTemplates);
+app.route('/', authRoutes);
 
 // Self-hosted QR code proxy — prevents leaking ref tokens to third-party services
 app.get('/api/qr', async (c) => {
