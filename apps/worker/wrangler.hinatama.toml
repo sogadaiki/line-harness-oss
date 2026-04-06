@@ -3,13 +3,13 @@ main = "src/index.ts"
 compatibility_date = "2024-12-01"
 workers_dev = true
 
-# Secrets (set via `wrangler secret put -c wrangler.hinatama.toml`):
-#   API_KEY, LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN,
-#   LINE_CHANNEL_ID, LINE_LOGIN_CHANNEL_ID, LINE_LOGIN_CHANNEL_SECRET
-
 [vars]
 WORKER_URL = "https://hinatama-line-worker.sogadaiki.workers.dev"
 SCOPED_LINE_ACCOUNT_ID = "22920358-e4eb-4878-bfa2-f6bf97fcb4fa"
+
+[assets]
+directory = "dist/client"
+binding = "ASSETS"
 
 [[d1_databases]]
 binding = "DB"

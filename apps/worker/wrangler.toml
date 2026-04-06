@@ -1,13 +1,10 @@
-name = "line-harness"
+name = "line-crm-worker"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 workers_dev = true
 
-# ═══════════════════════════════════════════════════════════════
-# デフォルト = テスト環境 (noda@)
-# 使い方: npx wrangler deploy
-# ═══════════════════════════════════════════════════════════════
-account_id = "YOUR_DEV_ACCOUNT_ID"
+[vars]
+WORKER_URL = "https://line-crm-worker.sogadaiki.workers.dev"
 
 [assets]
 directory = "dist/client"
@@ -15,36 +12,13 @@ binding = "ASSETS"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "line-harness"
-database_id = "YOUR_DEV_D1_DATABASE_ID"
+database_name = "sadame-line-crm"
+database_id = "973f09e0-a762-434e-9861-07279a28510e"
 
-[[r2_buckets]]
-binding = "IMAGES"
-bucket_name = "line-harness-images"
+# R2 bucket — create with `wrangler r2 bucket create line-harness-images` before enabling
+# [[r2_buckets]]
+# binding = "IMAGES"
+# bucket_name = "line-harness-images"
 
 [triggers]
-crons = ["*/5 * * * *"]
-
-# ═══════════════════════════════════════════════════════════════
-# 本番環境 (aiagent.mini@)
-# 使い方: npx wrangler deploy --env production --name your-worker-name
-# D1:     npx wrangler d1 execute line-crm --env production --remote --file ...
-# ═══════════════════════════════════════════════════════════════
-[env.production]
-account_id = "YOUR_ACCOUNT_ID"
-
-[env.production.assets]
-directory = "dist/client"
-binding = "ASSETS"
-
-[[env.production.d1_databases]]
-binding = "DB"
-database_name = "line-crm"
-database_id = "YOUR_D1_DATABASE_ID"
-
-[[env.production.r2_buckets]]
-binding = "IMAGES"
-bucket_name = "line-harness-images"
-
-[env.production.triggers]
 crons = ["*/5 * * * *"]
