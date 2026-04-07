@@ -148,18 +148,9 @@ async function processSingleDelivery(
   },
   workerUrl?: string,
 ): Promise<void> {
-  // Optimistic lock: claim this delivery by setting next_delivery_at = NULL.
-  // If another invocation already claimed it, meta.changes = 0 and we skip.
-  // CRITICAL: use meta.changes (actual rows affected), NOT meta.rows_written
-  // (I/O metric that can be >0 even when WHERE matched nothing).
-  const lock = await db
-    .prepare(
-      `UPDATE friend_scenarios SET next_delivery_at = NULL, updated_at = ?
-       WHERE id = ? AND next_delivery_at = ? AND status = 'active'`,
-    )
-    .bind(jstNow(), fs.id, fs.next_delivery_at)
-    .run();
-  if (!lock.meta.changes) return;
+  // Dedup is handled AFTER message build, right before pushMessage,
+  // via UNIQUE index on messages_log (friend_id, scenario_step_id).
+  // No optimistic lock needed here — the UNIQUE INSERT is the gate.
 
   // Get friend first to read preferred delivery hour from metadata
   const friend = await getFriendById(db, fs.friend_id);
