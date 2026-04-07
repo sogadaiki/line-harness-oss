@@ -22,4 +22,5 @@ migrations_dir = "../../packages/db/migrations"
 # bucket_name = "line-harness-images"
 
 [triggers]
-crons = ["0 0,12 * * *"]
+# crons disabled until duplicate delivery bug is fixed
+# crons = ["0 0,12 * * *"]
