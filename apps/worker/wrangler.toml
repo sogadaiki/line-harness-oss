@@ -14,6 +14,7 @@ binding = "ASSETS"
 binding = "DB"
 database_name = "sadame-line-crm"
 database_id = "973f09e0-a762-434e-9861-07279a28510e"
+migrations_dir = "../../packages/db/migrations"
 
 # R2 bucket — create with `wrangler r2 bucket create line-harness-images` before enabling
 # [[r2_buckets]]
@@ -21,4 +22,4 @@ database_id = "973f09e0-a762-434e-9861-07279a28510e"
 # bucket_name = "line-harness-images"
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/30 * * * *"]
