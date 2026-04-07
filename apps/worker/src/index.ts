@@ -260,16 +260,15 @@ async function scheduled(
   }
   const defaultLineClient = new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN);
 
-  // Run delivery for each account
+  // Run delivery ONCE (not per-account) — each delivery function resolves
+  // the correct LINE client internally via friend.line_account_id.
+  // Running per-account caused N× duplicate sends (one per token).
   const jobs = [];
-  for (const token of activeTokens) {
-    const lineClient = new LineClient(token);
-    jobs.push(
-      processStepDeliveries(env.DB, lineClient, env.WORKER_URL),
-      processScheduledBroadcasts(env.DB, lineClient, env.WORKER_URL),
-      processReminderDeliveries(env.DB, lineClient),
-    );
-  }
+  jobs.push(
+    processStepDeliveries(env.DB, defaultLineClient, env.WORKER_URL),
+    processScheduledBroadcasts(env.DB, defaultLineClient, env.WORKER_URL),
+    processReminderDeliveries(env.DB, defaultLineClient),
+  );
   jobs.push(checkAccountHealth(env.DB));
   jobs.push(refreshLineAccessTokens(env.DB));
 
