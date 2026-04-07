@@ -232,19 +232,23 @@ async function processSingleDelivery(
       deliveryClient = new LC(account.channel_access_token);
     }
   }
-  // Dedup guard: INSERT log FIRST with ON CONFLICT DO NOTHING.
-  // Only the first Worker instance succeeds (changes=1); others skip (changes=0).
-  // This prevents duplicate sends even when D1 cron spawns parallel Workers.
+  // Dedup guard: use db.batch() (atomic transaction) to INSERT + verify ownership.
+  // D1 cron can spawn parallel Workers. meta.changes is unreliable for ON CONFLICT.
+  // Instead: INSERT with ON CONFLICT DO NOTHING (no column spec = matches any UNIQUE),
+  // then SELECT to check if OUR id won. batch() guarantees atomicity.
   const logId = crypto.randomUUID();
-  const logResult = await db
-    .prepare(
+  const batchResults = await db.batch([
+    db.prepare(
       `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
        VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)
-       ON CONFLICT (friend_id, scenario_step_id) DO NOTHING`,
-    )
-    .bind(logId, friend.id, currentStep.message_type, currentStep.message_content, currentStep.id, jstNow())
-    .run();
-  if (!logResult.meta.changes) return; // Another instance already sent this step
+       ON CONFLICT DO NOTHING`,
+    ).bind(logId, friend.id, currentStep.message_type, currentStep.message_content, currentStep.id, jstNow()),
+    db.prepare(
+      `SELECT id FROM messages_log WHERE friend_id = ? AND scenario_step_id = ?`,
+    ).bind(friend.id, currentStep.id),
+  ]);
+  const winner = (batchResults[1].results as Array<{ id: string }>)[0];
+  if (!winner || winner.id !== logId) return;
 
   await deliveryClient.pushMessage(friend.line_user_id, [message]);
 

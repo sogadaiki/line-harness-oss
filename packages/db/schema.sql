@@ -152,6 +152,9 @@ CREATE TABLE IF NOT EXISTS messages_log (
 
 CREATE INDEX IF NOT EXISTS idx_messages_log_friend_id ON messages_log (friend_id);
 CREATE INDEX IF NOT EXISTS idx_messages_log_created_at ON messages_log (created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_log_step_dedup
+ON messages_log(friend_id, scenario_step_id)
+WHERE scenario_step_id IS NOT NULL;
 
 -- ============================================================
 -- Auto Replies
