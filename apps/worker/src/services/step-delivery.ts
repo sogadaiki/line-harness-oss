@@ -232,23 +232,26 @@ async function processSingleDelivery(
       deliveryClient = new LC(account.channel_access_token);
     }
   }
-  // Dedup guard: use db.batch() (atomic transaction) to INSERT + verify ownership.
-  // D1 cron can spawn parallel Workers. meta.changes is unreliable for ON CONFLICT.
-  // Instead: INSERT with ON CONFLICT DO NOTHING (no column spec = matches any UNIQUE),
-  // then SELECT to check if OUR id won. batch() guarantees atomicity.
+  // Dedup guard: two-phase approach for parallel Worker safety.
+  // Phase 1: Pre-check — if already sent, skip entirely (fast path for most cases).
+  // Phase 2: Atomic INSERT with RETURNING — only the first INSERT returns a row.
+  // D1 cron spawns parallel Workers, and db.batch() INSERT+SELECT is NOT serializable
+  // across Workers (proven by 4x duplicate sends on 2026-04-07).
+  const preCheck = await db.prepare(
+    `SELECT id FROM messages_log WHERE friend_id = ? AND scenario_step_id = ?`,
+  ).bind(friend.id, currentStep.id).first<{ id: string }>();
+  if (preCheck) return; // Already sent by another Worker
+
   const logId = crypto.randomUUID();
-  const batchResults = await db.batch([
-    db.prepare(
-      `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-       VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)
-       ON CONFLICT DO NOTHING`,
-    ).bind(logId, friend.id, currentStep.message_type, currentStep.message_content, currentStep.id, jstNow()),
-    db.prepare(
-      `SELECT id FROM messages_log WHERE friend_id = ? AND scenario_step_id = ?`,
-    ).bind(friend.id, currentStep.id),
-  ]);
-  const winner = (batchResults[1].results as Array<{ id: string }>)[0];
-  if (!winner || winner.id !== logId) return;
+  const insertResult = await db.prepare(
+    `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+     VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+  ).bind(logId, friend.id, currentStep.message_type, currentStep.message_content, currentStep.id, jstNow()).first<{ id: string }>();
+
+  // RETURNING returns null if ON CONFLICT fired (duplicate) — only winner gets a row
+  if (!insertResult) return;
 
   await deliveryClient.pushMessage(friend.line_user_id, [message]);
 
