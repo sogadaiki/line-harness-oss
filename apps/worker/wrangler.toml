@@ -22,4 +22,4 @@ migrations_dir = "../../packages/db/migrations"
 # bucket_name = "line-harness-images"
 
 [triggers]
-crons = ["*/30 * * * *"]
+crons = ["0 0,12 * * *"]
