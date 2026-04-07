@@ -149,15 +149,17 @@ async function processSingleDelivery(
   workerUrl?: string,
 ): Promise<void> {
   // Optimistic lock: claim this delivery by setting next_delivery_at = NULL.
-  // If another cron already claimed it, rows_written = 0 and we skip.
+  // If another invocation already claimed it, meta.changes = 0 and we skip.
+  // CRITICAL: use meta.changes (actual rows affected), NOT meta.rows_written
+  // (I/O metric that can be >0 even when WHERE matched nothing).
   const lock = await db
     .prepare(
       `UPDATE friend_scenarios SET next_delivery_at = NULL, updated_at = ?
-       WHERE id = ? AND next_delivery_at = ?`,
+       WHERE id = ? AND next_delivery_at = ? AND status = 'active'`,
     )
     .bind(jstNow(), fs.id, fs.next_delivery_at)
     .run();
-  if (!lock.meta.rows_written || lock.meta.rows_written === 0) return;
+  if (!lock.meta.changes) return;
 
   // Get friend first to read preferred delivery hour from metadata
   const friend = await getFriendById(db, fs.friend_id);
