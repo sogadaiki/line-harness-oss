@@ -14,6 +14,8 @@ import {
   getLineAccounts,
   addTagToFriend,
   getActiveAutomationsByEvent,
+  getEntryRouteByRefCode,
+  recordRefTracking,
   jstNow,
 } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
@@ -244,13 +246,36 @@ async function handleEvent(
       }
     }
 
-    // ref をメタデータに保存
+    // ref をメタデータに保存 + entry_route 自動タグ付け
     if (followRef) {
       const existing = await db.prepare('SELECT metadata FROM friends WHERE id = ?').bind(friend.id).first<{ metadata: string | null }>();
       const meta = JSON.parse(existing?.metadata || '{}');
       meta.follow_ref = followRef;
       await db.prepare('UPDATE friends SET metadata = ?, updated_at = ? WHERE id = ?')
         .bind(JSON.stringify(meta), jstNow(), friend.id).run();
+
+      // Save ref_code on friend (first touch wins)
+      await db.prepare('UPDATE friends SET ref_code = ? WHERE id = ? AND ref_code IS NULL')
+        .bind(followRef, friend.id).run();
+
+      // Entry route: auto-tag + tracking
+      try {
+        const route = await getEntryRouteByRefCode(db, followRef);
+        await recordRefTracking(db, {
+          refCode: followRef,
+          friendId: friend.id,
+          entryRouteId: route?.id ?? null,
+          sourceUrl: null,
+          gclid: null, fbclid: null, twclid: null, ttclid: null,
+          utmSource: null, utmMedium: null, utmCampaign: null,
+          userAgent: null, ipAddress: null,
+        });
+        if (route?.tag_id) {
+          await addTagToFriend(db, friend.id, route.tag_id);
+        }
+      } catch (err) {
+        console.error('Failed entry route processing for ref:', followRef, err);
+      }
     }
 
     // イベントバス発火: friend_add
