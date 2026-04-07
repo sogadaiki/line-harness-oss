@@ -186,8 +186,13 @@ async function handleEvent(
       }
     }
 
-    // ref パラメータ抽出（LINE follow event の follow.ref フィールド）
-    const followRef = (event as { follow?: { ref?: string } }).follow?.ref ?? null;
+    // ref パラメータ抽出
+    // 1. LINE follow event の follow.ref（LINE公式の友だち追加経路）
+    // 2. friends.ref_code（LIFF /auth/callback 経由で事前保存された値）をフォールバック
+    let followRef = (event as { follow?: { ref?: string } }).follow?.ref ?? null;
+    if (!followRef && friend.ref_code) {
+      followRef = friend.ref_code;
+    }
 
     // ref に基づくオートメーション実行（友だち追加時の流入経路別あいさつ + タグ付与）
     let replyTokenUsed = false;
@@ -219,8 +224,8 @@ async function handleEvent(
                   const logId = crypto.randomUUID();
                   await db
                     .prepare(
-                      `INSERT INTO messages_log (id, friend_id, direction, message_type, content, delivery_type, created_at)
-                       VALUES (?, ?, 'outgoing', 'text', ?, 'reply', ?)`,
+                      `INSERT INTO messages_log (id, friend_id, direction, message_type, content, created_at)
+                       VALUES (?, ?, 'outgoing', 'text', ?, ?)`,
                     )
                     .bind(logId, friend.id, m.text || '', jstNow())
                     .run();
@@ -246,14 +251,8 @@ async function handleEvent(
       }
     }
 
-    // ref をメタデータに保存 + entry_route 自動タグ付け
+    // ref_code 保存 + entry_route 自動タグ付け
     if (followRef) {
-      const existing = await db.prepare('SELECT metadata FROM friends WHERE id = ?').bind(friend.id).first<{ metadata: string | null }>();
-      const meta = JSON.parse(existing?.metadata || '{}');
-      meta.follow_ref = followRef;
-      await db.prepare('UPDATE friends SET metadata = ?, updated_at = ? WHERE id = ?')
-        .bind(JSON.stringify(meta), jstNow(), friend.id).run();
-
       // Save ref_code on friend (first touch wins)
       await db.prepare('UPDATE friends SET ref_code = ? WHERE id = ? AND ref_code IS NULL')
         .bind(followRef, friend.id).run();

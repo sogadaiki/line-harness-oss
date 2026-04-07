@@ -8,7 +8,7 @@ export interface Friend {
   is_following: number;
   user_id: string | null;
   line_account_id: string | null;
-  metadata: string;
+  ref_code: string | null;
   created_at: string;
   updated_at: string;
 }
