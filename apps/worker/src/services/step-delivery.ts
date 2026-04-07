@@ -241,17 +241,21 @@ async function processSingleDelivery(
       deliveryClient = new LC(account.channel_access_token);
     }
   }
-  await deliveryClient.pushMessage(friend.line_user_id, [message]);
-
-  // Log outgoing message
+  // Dedup guard: INSERT log FIRST with ON CONFLICT DO NOTHING.
+  // Only the first Worker instance succeeds (changes=1); others skip (changes=0).
+  // This prevents duplicate sends even when D1 cron spawns parallel Workers.
   const logId = crypto.randomUUID();
-  await db
+  const logResult = await db
     .prepare(
       `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-       VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)`,
+       VALUES (?, ?, 'outgoing', ?, ?, NULL, ?, ?)
+       ON CONFLICT (friend_id, scenario_step_id) DO NOTHING`,
     )
     .bind(logId, friend.id, currentStep.message_type, currentStep.message_content, currentStep.id, jstNow())
     .run();
+  if (!logResult.meta.changes) return; // Another instance already sent this step
+
+  await deliveryClient.pushMessage(friend.line_user_id, [message]);
 
   // Determine next step (find the step after currentStep in the sorted list)
   const currentIndex = steps.indexOf(currentStep);
