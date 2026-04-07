@@ -195,8 +195,9 @@ async function handleEvent(
     }
 
     // ref に基づくオートメーション実行（友だち追加時の流入経路別あいさつ + タグ付与）
+    // Run follow automations: ref-specific match first, then default (empty conditions) as fallback
     let replyTokenUsed = false;
-    if (followRef || true) {
+    {
       const allAutomations = await getActiveAutomationsByEvent(db, 'follow');
       const accountAutomations = allAutomations.filter(
         (a) => !a.line_account_id || !lineAccountId || a.line_account_id === lineAccountId,

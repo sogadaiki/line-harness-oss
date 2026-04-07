@@ -441,24 +441,16 @@ liffRoutes.get('/auth/callback', async (c) => {
       }
     }
 
-    // Auto-enroll in friend_add scenarios + immediate delivery (skip delivery window)
+    // Auto-enroll in friend_add scenarios (enrollment only — NO immediate delivery here)
+    // Message delivery is handled by the webhook follow handler to avoid duplicate sends.
+    // The webhook fires shortly after OAuth callback and handles replyMessage + step advancement.
     try {
-      const { getScenarios, enrollFriendInScenario: enroll, getScenarioSteps } = await import('@line-crm/db');
-      const { LineClient } = await import('@line-crm/line-sdk');
-      const { buildMessage, expandVariables } = await import('../services/step-delivery.js');
+      const { getScenarios, enrollFriendInScenario: enroll } = await import('@line-crm/db');
 
       // Resolve which account this friend belongs to
       const matchedAccountId = accountParam
         ? (await getLineAccountByChannelId(db, accountParam))?.id ?? null
         : null;
-
-      // Get access token for this account
-      let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
-      if (accountParam) {
-        const acct = await getLineAccountByChannelId(db, accountParam);
-        if (acct) accessToken = acct.channel_access_token;
-      }
-      const lineClient = new LineClient(accessToken);
 
       const scenarios = await getScenarios(db);
       for (const scenario of scenarios) {
@@ -470,20 +462,6 @@ liffRoutes.get('/auth/callback', async (c) => {
             .first<{ id: string }>();
           if (!existing) {
             await enroll(db, friend.id, scenario.id);
-
-            // Immediate delivery of first step (skip delivery window)
-            const steps = await getScenarioSteps(db, scenario.id);
-            const firstStep = steps[0];
-            if (firstStep && firstStep.delay_minutes === 0) {
-              const { resolveMetadata: resolveMetaLiff } = await import('../services/step-delivery.js');
-              const resolvedMetaLiff = await resolveMetaLiff(db, { user_id: (friend as unknown as Record<string, string | null>).user_id, metadata: (friend as unknown as Record<string, string | null>).metadata });
-              const expandedContent = expandVariables(
-                firstStep.message_content,
-                { ...friend, metadata: resolvedMetaLiff } as Parameters<typeof expandVariables>[1],
-                c.env.WORKER_URL,
-              );
-              await lineClient.pushMessage(lineUserId, [buildMessage(firstStep.message_type, expandedContent)]);
-            }
           }
         }
       }
