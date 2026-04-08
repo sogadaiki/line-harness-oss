@@ -141,17 +141,13 @@ liffRoutes.get('/auth/line', async (c) => {
   if (accountParam) qrParams.set('account', accountParam);
   const qrUrl = qrParams.toString() ? `${liffUrl}?${qrParams.toString()}` : liffUrl;
 
-  // Mobile: redirect to LIFF URL (opens LINE app directly)
-  // Exception: cross-account links (account param) use OAuth directly
-  // because Account A's LIFF can't open from Account B's LINE chat
+  // Mobile: redirect to OAuth URL directly (more reliable than LIFF redirect)
+  // LIFF redirect can fail with "Authorization failed" due to LIFF config issues,
+  // while OAuth direct flow works consistently and still triggers bot_prompt=aggressive.
   const ua = (c.req.header('user-agent') || '').toLowerCase();
   const isMobile = /iphone|ipad|android|mobile/.test(ua);
   if (isMobile) {
-    if (accountParam) {
-      // Cross-account link: use OAuth so callback handles push
-      return c.redirect(loginUrl.toString());
-    }
-    return c.redirect(qrUrl);
+    return c.redirect(loginUrl.toString());
   }
 
   // PC: show QR code page
