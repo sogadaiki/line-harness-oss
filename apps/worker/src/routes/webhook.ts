@@ -523,13 +523,21 @@ async function handleEvent(
           const resolvedMeta2 = await resolveMeta2(db, { user_id: (friend as unknown as Record<string, string | null>).user_id, metadata: (friend as unknown as Record<string, string | null>).metadata });
           const expandedContent = expandVariables(rule.response_content, { ...friend, metadata: resolvedMeta2 } as Parameters<typeof expandVariables>[1], workerUrl);
 
-          // Support multi-message: response_content can be JSON array of strings
-          // e.g. ["first bubble", "second bubble"] or just a plain string
+          // Support multiple response_content shapes:
+          // 1. Plain text → single text message
+          // 2. ["text1","text2"] → multiple text messages
+          // 3. {"text":"...","quickReply":{...}} → text message with quickReply (legacy shape w/o explicit type)
+          // 4. {"type":"text"|"flex"|"image"|..., ...} → typed message (pass-through)
+          // 5. [{...},{...}] → array of typed messages (pass-through)
           let replyMessages: ReturnType<typeof buildMessage>[];
           try {
             const parsed = JSON.parse(expandedContent);
             if (Array.isArray(parsed) && parsed.every((m: unknown) => typeof m === 'string')) {
               replyMessages = parsed.map((text: string) => buildMessage('text', text));
+            } else if (Array.isArray(parsed)) {
+              replyMessages = parsed.map((m: unknown) => normalizeAutoReplyMessage(m, rule.response_type));
+            } else if (parsed && typeof parsed === 'object') {
+              replyMessages = [normalizeAutoReplyMessage(parsed, rule.response_type)];
             } else {
               replyMessages = [buildMessage(rule.response_type, expandedContent)];
             }
@@ -583,6 +591,28 @@ async function handleEvent(
 
     return;
   }
+}
+
+/**
+ * Normalize an auto_reply payload object into a LINE Messaging API Message.
+ * Supports:
+ * - Legacy shape: {text, quickReply?} without explicit type → treat as text message
+ * - Typed shape: {type:"text"|"flex"|"image"|..., ...} → pass through
+ * - Fallback: serialize and treat as text via buildMessage(fallbackType)
+ */
+function normalizeAutoReplyMessage(raw: unknown, fallbackType: string): ReturnType<typeof buildMessage> {
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.type !== 'string' && typeof obj.text === 'string') {
+      const msg: Record<string, unknown> = { type: 'text', text: obj.text };
+      if (obj.quickReply) msg.quickReply = obj.quickReply;
+      return msg as unknown as ReturnType<typeof buildMessage>;
+    }
+    if (typeof obj.type === 'string') {
+      return obj as unknown as ReturnType<typeof buildMessage>;
+    }
+  }
+  return buildMessage(fallbackType, typeof raw === 'string' ? raw : JSON.stringify(raw));
 }
 
 export { webhook };
