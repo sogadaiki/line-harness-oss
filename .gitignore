@@ -13,3 +13,5 @@ dist/
 .env.staging
 apps/web/out/
 apps/worker/dist/
+restart/
+restart.md

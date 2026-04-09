@@ -1,10 +1,18 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8787'
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen" style={{ backgroundColor: '#06C755' }} />}>
+      <LoginPageInner />
+    </Suspense>
+  )
+}
+
+function LoginPageInner() {
   const [apiKey, setApiKey] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
