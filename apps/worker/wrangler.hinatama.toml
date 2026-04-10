@@ -5,6 +5,7 @@ workers_dev = true
 
 [vars]
 WORKER_URL = "https://hinatama-line-worker.sogadaiki.workers.dev"
+ADMIN_URL = "https://hinatama-line-admin.pages.dev"
 SCOPED_LINE_ACCOUNT_ID = "22920358-e4eb-4878-bfa2-f6bf97fcb4fa"
 
 [assets]

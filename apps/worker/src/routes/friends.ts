@@ -13,6 +13,7 @@ import {
 import type { Friend as DbFriend, Tag as DbTag } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
 import { buildMessage } from '../services/step-delivery.js';
+import { getScope } from '../utils/scope.js';
 import type { Env } from '../index.js';
 
 const friends = new Hono<Env>();
@@ -50,7 +51,7 @@ friends.get('/api/friends', async (c) => {
     const limit = Number(c.req.query('limit') ?? '50');
     const offset = Number(c.req.query('offset') ?? '0');
     const tagId = c.req.query('tagId');
-    const lineAccountId = c.req.query('lineAccountId') || c.get('scopedAccountId') as string | undefined;
+    const lineAccountId = getScope(c);
     const search = c.req.query('search');
 
     const db = c.env.DB;
@@ -119,7 +120,7 @@ friends.get('/api/friends', async (c) => {
 // GET /api/friends/count - friend count (must be before /:id)
 friends.get('/api/friends/count', async (c) => {
   try {
-    const lineAccountId = c.req.query('lineAccountId');
+    const lineAccountId = getScope(c);
     let count: number;
     if (lineAccountId) {
       const row = await c.env.DB.prepare('SELECT COUNT(*) as count FROM friends WHERE is_following = 1 AND line_account_id = ?')
@@ -138,7 +139,7 @@ friends.get('/api/friends/count', async (c) => {
 // GET /api/friends/ref-stats - ref code attribution stats
 friends.get('/api/friends/ref-stats', async (c) => {
   try {
-    const lineAccountId = c.req.query('lineAccountId');
+    const lineAccountId = getScope(c);
     const where = lineAccountId ? 'WHERE line_account_id = ?' : 'WHERE ref_code IS NOT NULL';
     const binds = lineAccountId ? [lineAccountId] : [];
     const stmt = c.env.DB.prepare(

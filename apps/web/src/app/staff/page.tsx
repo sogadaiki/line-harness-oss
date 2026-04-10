@@ -6,6 +6,7 @@ import type { ApiResponse } from '@line-crm/shared'
 import type { StaffMember } from '@line-crm/shared'
 
 type NewApiKey = { apiKey: string; staffId: string }
+type NewInvite = { inviteUrl: string; staffName: string; expiresIn: string }
 
 function RoleBadge({ role }: { role: string }) {
   const styles =
@@ -36,6 +37,10 @@ export default function StaffPage() {
   // New API key banner
   const [newKey, setNewKey] = useState<NewApiKey | null>(null)
   const [copied, setCopied] = useState(false)
+
+  // New invite URL banner
+  const [newInvite, setNewInvite] = useState<NewInvite | null>(null)
+  const [inviteCopied, setInviteCopied] = useState(false)
 
   // Create form
   const [showForm, setShowForm] = useState(false)
@@ -112,6 +117,41 @@ export default function StaffPage() {
     }
   }
 
+  const handleIssueInvite = async (member: StaffMember) => {
+    if (!confirm(
+      `${member.name} の LINE Login 招待URLを発行しますか？\n` +
+      `\n` +
+      `・URLを本人にLINE等で送ってください\n` +
+      `・本人がスマホで開いて「許可する」を押すとログインできます\n` +
+      `・URLは24時間有効です（再発行で延長可）`,
+    )) return
+    try {
+      const res = await fetchApi<ApiResponse<{ inviteUrl: string; expiresIn: string }>>(
+        `/api/staff/${member.id}/invite`,
+        { method: 'POST' },
+      )
+      if (res.success) {
+        setNewInvite({
+          inviteUrl: res.data.inviteUrl,
+          staffName: member.name,
+          expiresIn: res.data.expiresIn,
+        })
+        await loadMembers()
+      } else {
+        setError(res.error ?? '招待URLの発行に失敗しました')
+      }
+    } catch {
+      setError('招待URLの発行に失敗しました')
+    }
+  }
+
+  const handleCopyInvite = async () => {
+    if (!newInvite) return
+    await navigator.clipboard.writeText(newInvite.inviteUrl)
+    setInviteCopied(true)
+    setTimeout(() => setInviteCopied(false), 2000)
+  }
+
   const handleRegenerateKey = async (member: StaffMember) => {
     if (!confirm(`${member.name} のAPIキーを再生成しますか？\n現在のキーは無効になります。`)) return
     try {
@@ -178,6 +218,35 @@ export default function StaffPage() {
             </button>
             <button
               onClick={() => setNewKey(null)}
+              className="shrink-0 px-3 py-2 text-xs font-medium text-gray-500 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* New invite URL banner */}
+      {newInvite && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-sm font-medium text-blue-800 mb-1">
+            {newInvite.staffName} の招待URLを発行しました
+          </p>
+          <p className="text-xs text-blue-700 mb-3">
+            このURLを本人にLINEで送ってください。スマホで開いて「許可する」を押すとログインできます。有効期限: {newInvite.expiresIn}
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="flex-1 text-xs bg-white border border-blue-200 rounded px-3 py-2 font-mono break-all">
+              {newInvite.inviteUrl}
+            </code>
+            <button
+              onClick={handleCopyInvite}
+              className="shrink-0 px-3 py-2 text-xs font-medium text-blue-700 bg-white border border-blue-300 rounded-lg hover:bg-blue-50 transition-colors"
+            >
+              {inviteCopied ? 'コピー済み' : 'コピー'}
+            </button>
+            <button
+              onClick={() => setNewInvite(null)}
               className="shrink-0 px-3 py-2 text-xs font-medium text-gray-500 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
             >
               閉じる
@@ -283,6 +352,7 @@ export default function StaffPage() {
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">名前</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden sm:table-cell">メール</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">ロール</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">LINE 連携</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider hidden md:table-cell">APIキー</th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">状態</th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">操作</th>
@@ -296,6 +366,21 @@ export default function StaffPage() {
                   <td className="px-4 py-3">
                     <RoleBadge role={member.role} />
                   </td>
+                  <td className="px-4 py-3">
+                    {member.lineLinked ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-green-700">
+                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                        </svg>
+                        紐付け済
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-gray-400">
+                        <span className="w-1.5 h-1.5 rounded-full bg-gray-300" />
+                        未紐付け
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-gray-400 font-mono text-xs hidden md:table-cell">
                     {maskKey(member.apiKey ?? '')}
                   </td>
@@ -306,9 +391,18 @@ export default function StaffPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="flex items-center justify-end gap-2 flex-wrap">
                       {member.role !== 'owner' && (
                         <>
+                          {!member.lineLinked && (
+                            <button
+                              onClick={() => handleIssueInvite(member)}
+                              className="px-2.5 py-1 text-xs font-medium text-white rounded transition-opacity hover:opacity-90"
+                              style={{ backgroundColor: '#06C755' }}
+                            >
+                              招待URLを発行
+                            </button>
+                          )}
                           <button
                             onClick={() => handleToggleActive(member)}
                             className="px-2.5 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors"

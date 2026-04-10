@@ -8,6 +8,7 @@ import {
 } from '@line-crm/db';
 import type { LineAccount as DbLineAccount } from '@line-crm/db';
 import { requireRole } from '../middleware/role-guard.js';
+import { getScope } from '../utils/scope.js';
 import type { Env } from '../index.js';
 
 const lineAccounts = new Hono<Env>();
@@ -47,10 +48,15 @@ async function fetchBotProfile(accessToken: string): Promise<{ displayName?: str
 }
 
 // GET /api/line-accounts - list all (with LINE profile + stats)
+// HARDLOCK: when scoped (tenant-bound worker), return ONLY that one account.
+// This drives the admin UI dropdown — a single-account list means no switcher,
+// no cross-tenant data access path. See utils/scope.ts for the rationale.
 lineAccounts.get('/api/line-accounts', async (c) => {
   try {
     const db = c.env.DB;
-    const items = await getLineAccounts(db);
+    const allItems = await getLineAccounts(db);
+    const scoped = getScope(c);
+    const items = scoped ? allItems.filter((a) => a.id === scoped) : allItems;
 
     // Get stats for all accounts in parallel
     const results = await Promise.all(

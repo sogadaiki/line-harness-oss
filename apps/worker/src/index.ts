@@ -59,6 +59,7 @@ export type Env = {
     LINE_LOGIN_CHANNEL_ID: string;
     LINE_LOGIN_CHANNEL_SECRET: string;
     WORKER_URL: string;
+    ADMIN_URL?: string;
     SESSION_SECRET?: string;
     SCOPED_LINE_ACCOUNT_ID?: string;
     X_HARNESS_URL?: string;

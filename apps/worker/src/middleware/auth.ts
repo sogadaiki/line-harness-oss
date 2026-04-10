@@ -3,6 +3,10 @@ import { getStaffByApiKey, getStaffById } from '@line-crm/db';
 import { verifyJwt } from '../utils/jwt.js';
 import type { Env } from '../index.js';
 
+interface JwtPayload {
+  staffId: string;
+}
+
 function parseCookie(header: string, name: string): string | null {
   const match = header.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
   return match ? match[1] : null;
@@ -42,12 +46,12 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     }
   };
 
-  // Strategy 1: Bearer token (existing API key auth)
+  // Strategy 1: Bearer token
   const authHeader = c.req.header('Authorization');
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.slice('Bearer '.length);
 
-    // Check staff_members table first
+    // 1a: Try as staff API key
     const staff = await getStaffByApiKey(c.env.DB, token);
     if (staff) {
       c.set('staff', { id: staff.id, name: staff.name, role: staff.role });
@@ -55,7 +59,21 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
       return next();
     }
 
-    // Fallback: env API_KEY acts as owner
+    // 1b: Try as JWT session token (iOS Safari fallback for cross-origin
+    //     where third-party cookies are blocked. The admin UI stores the JWT
+    //     in localStorage and sends it as Bearer instead of relying on cookie.)
+    const secret = c.env.SESSION_SECRET || c.env.API_KEY;
+    const jwtPayload = await verifyJwt(token, secret) as JwtPayload | null;
+    if (jwtPayload && jwtPayload.staffId) {
+      const jwtStaff = await getStaffById(c.env.DB, jwtPayload.staffId);
+      if (jwtStaff && jwtStaff.is_active) {
+        c.set('staff', { id: jwtStaff.id, name: jwtStaff.name, role: jwtStaff.role });
+        applyScope();
+        return next();
+      }
+    }
+
+    // 1c: Fallback — env API_KEY acts as owner
     if (token === c.env.API_KEY) {
       c.set('staff', { id: 'env-owner', name: 'Owner', role: 'owner' as const });
       applyScope();
@@ -63,13 +81,13 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     }
   }
 
-  // Strategy 2: Cookie JWT session
+  // Strategy 2: Cookie JWT session (works on PC, blocked by iOS Safari ITP for cross-origin)
   const cookieHeader = c.req.header('Cookie') || '';
   const sessionToken = parseCookie(cookieHeader, 'lh_session');
   if (sessionToken) {
     const secret = c.env.SESSION_SECRET || c.env.API_KEY;
-    const payload = await verifyJwt(sessionToken, secret);
-    if (payload) {
+    const payload = await verifyJwt(sessionToken, secret) as JwtPayload | null;
+    if (payload && payload.staffId) {
       // Verify staff still exists and is active
       const staff = await getStaffById(c.env.DB, payload.staffId);
       if (staff && staff.is_active) {

@@ -51,25 +51,35 @@ if (!API_URL) {
 }
 
 /**
- * Read the API key from localStorage (set during login).
+ * Read the bearer token to use for API auth.
+ * Priority:
+ *   1. lh_api_key       — explicit API key login (legacy)
+ *   2. lh_session_jwt   — LINE Login JWT (iOS Safari fallback for cross-origin cookies)
+ *
  * Never embed secrets in the client bundle via NEXT_PUBLIC_* env vars.
  */
-function getApiKey(): string {
-  if (typeof window !== 'undefined') {
-    return localStorage.getItem('lh_api_key') || ''
-  }
+function getBearerToken(): string {
+  if (typeof window === 'undefined') return ''
+  // API key takes precedence (explicit auth choice)
+  const apiKey = localStorage.getItem('lh_api_key')
+  if (apiKey) return apiKey
+  // LINE Login session JWT (extracted from hash fragment in login page)
+  const jwt = localStorage.getItem('lh_session_jwt')
+  if (jwt) return jwt
   return ''
 }
 
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
-  const apiKey = getApiKey()
+  const token = getBearerToken()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...options?.headers as Record<string, string>,
   }
-  // Only add Bearer token if API key auth is in use
-  if (apiKey) {
-    headers['Authorization'] = `Bearer ${apiKey}`
+  // Always send a Bearer token if we have one. credentials:'include' covers
+  // the cookie path for browsers that allow third-party cookies (PC); the
+  // Bearer covers the iOS Safari path where cross-origin cookies are blocked.
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
   }
   const res = await fetch(`${API_URL}${path}`, {
     ...options,

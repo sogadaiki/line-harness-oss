@@ -119,7 +119,8 @@ auth.get('/auth/staff/line/callback', async (c) => {
       lineAccountId: scopedAccountId,
     }, secret);
 
-    return buildSessionRedirect(c.env.WORKER_URL, jwt, staffByInvite.name, staffByInvite.role, getStaffPermissions(staffByInvite));
+    const adminUrl = c.env.ADMIN_URL || c.env.WORKER_URL;
+    return buildSessionRedirect(c.env.WORKER_URL, adminUrl, jwt, staffByInvite.name, staffByInvite.role, getStaffPermissions(staffByInvite));
   }
 
   // Case 2: Existing staff with this LINE user ID
@@ -131,7 +132,8 @@ auth.get('/auth/staff/line/callback', async (c) => {
       lineAccountId: scopedAccountId,
     }, secret);
 
-    return buildSessionRedirect(c.env.WORKER_URL, jwt, staffByLine.name, staffByLine.role, getStaffPermissions(staffByLine));
+    const adminUrl = c.env.ADMIN_URL || c.env.WORKER_URL;
+    return buildSessionRedirect(c.env.WORKER_URL, adminUrl, jwt, staffByLine.name, staffByLine.role, getStaffPermissions(staffByLine));
   }
 
   // Case 3: No matching staff — unauthorized
@@ -194,6 +196,7 @@ auth.get('/api/staff/me/permissions', async (c) => {
 
 function buildSessionRedirect(
   workerUrl: string,
+  adminUrl: string,
   jwt: string,
   staffName: string,
   staffRole: string,
@@ -201,7 +204,12 @@ function buildSessionRedirect(
 ): Response {
   const url = new URL(workerUrl);
   const maxAge = 8 * 60 * 60; // 8 hours
-  const cookieStr = `lh_session=${jwt}; Path=/; Domain=${url.hostname}; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
+  // SameSite=None required so the cookie is sent on cross-origin fetch
+  // from the admin Pages app (different hostname) to this worker.
+  // Note: iOS Safari ITP blocks even SameSite=None cookies in cross-origin
+  // fetch contexts. We additionally pass the JWT in a URL hash fragment so
+  // the admin UI can store it in localStorage and send it as a Bearer token.
+  const cookieStr = `lh_session=${jwt}; Path=/; Domain=${url.hostname}; HttpOnly; Secure; SameSite=None; Max-Age=${maxAge}`;
 
   const params = new URLSearchParams({
     auth: 'success',
@@ -210,10 +218,21 @@ function buildSessionRedirect(
     permissions: JSON.stringify(permissions),
   });
 
+  // Land on the admin /login page so its useEffect picks up the params,
+  // writes them to localStorage, and forwards to '/'. Worker root serves
+  // the customer-facing LIFF page, not the admin dashboard.
+  //
+  // The JWT is appended as a URL hash fragment (#token=...) instead of a
+  // query parameter so it is NEVER sent to any server (HTTP spec: fragments
+  // are client-side only). The admin login page reads window.location.hash,
+  // saves the token to localStorage, then strips it via history.replaceState.
+  // This is the iOS Safari fallback path when cross-origin cookies are blocked.
+  const target = `${adminUrl}/login?${params.toString()}#token=${encodeURIComponent(jwt)}`;
+
   return new Response(null, {
     status: 302,
     headers: {
-      Location: `${workerUrl}/?${params.toString()}`,
+      Location: target,
       'Set-Cookie': cookieStr,
     },
   });

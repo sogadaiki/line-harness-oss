@@ -12,6 +12,7 @@ import {
   updateChat,
   jstNow,
 } from '@line-crm/db';
+import { getScope } from '../utils/scope.js';
 import type { Env } from '../index.js';
 
 const chats = new Hono<Env>();
@@ -110,7 +111,7 @@ chats.get('/api/chats', async (c) => {
   try {
     const status = c.req.query('status') ?? undefined;
     const operatorId = c.req.query('operatorId') ?? undefined;
-    const lineAccountId = c.req.query('lineAccountId') || c.get('scopedAccountId') as string | undefined;
+    const lineAccountId = getScope(c);
 
     // JOIN friends to get display_name and picture_url
     let sql = `SELECT c.*, f.display_name, f.picture_url, f.line_user_id

@@ -19,6 +19,7 @@ import type {
   ScenarioTriggerType,
   MessageType,
 } from '@line-crm/db';
+import { getScope } from '../utils/scope.js';
 import type { Env } from '../index.js';
 
 const scenarios = new Hono<Env>();
@@ -70,7 +71,7 @@ function serializeFriendScenario(row: DbFriendScenario) {
 // GET /api/scenarios - list all
 scenarios.get('/api/scenarios', async (c) => {
   try {
-    const lineAccountId = c.req.query('lineAccountId') || c.get('scopedAccountId') as string | undefined;
+    const lineAccountId = getScope(c);
     let items: DbScenarioWithStepCount[];
     if (lineAccountId) {
       const result = await c.env.DB

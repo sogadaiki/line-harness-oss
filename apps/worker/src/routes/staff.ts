@@ -28,6 +28,9 @@ function serializeStaff(row: StaffMember, masked = true) {
     isActive: Boolean(row.is_active),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    // True when LINE Login completed at least once (line_user_id set).
+    // Drives the admin UI "LINE 連携" badge / "招待URLを発行" button visibility.
+    lineLinked: row.line_user_id !== null && row.line_user_id !== undefined,
   };
 }
 

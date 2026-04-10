@@ -30,6 +30,22 @@ function LoginPageInner() {
       if (role) localStorage.setItem('lh_staff_role', role)
       const permissions = searchParams.get('permissions')
       if (permissions) localStorage.setItem('lh_permissions', permissions)
+
+      // iOS Safari fallback: extract JWT from URL hash fragment.
+      // The worker callback appends #token=<jwt> so we can store it in
+      // localStorage and send it as a Bearer token (cross-origin cookies
+      // are blocked by Safari ITP for cross-site fetch).
+      // Hash fragments are never sent to servers, so logs/referrers stay clean.
+      if (typeof window !== 'undefined' && window.location.hash) {
+        const hashParams = new URLSearchParams(window.location.hash.slice(1))
+        const token = hashParams.get('token')
+        if (token) {
+          localStorage.setItem('lh_session_jwt', token)
+          // Strip the token from the URL bar immediately (defense in depth)
+          history.replaceState(null, '', window.location.pathname + window.location.search)
+        }
+      }
+
       // Mark as session-authenticated (no API key needed)
       localStorage.setItem('lh_auth_type', 'session')
       router.replace('/')

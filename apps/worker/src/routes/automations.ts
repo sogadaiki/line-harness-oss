@@ -7,6 +7,7 @@ import {
   deleteAutomation,
   getAutomationLogs,
 } from '@line-crm/db';
+import { getScope } from '../utils/scope.js';
 import type { Env } from '../index.js';
 
 const automations = new Hono<Env>();
@@ -15,7 +16,7 @@ const automations = new Hono<Env>();
 
 automations.get('/api/automations', async (c) => {
   try {
-    const lineAccountId = c.req.query('lineAccountId') || c.get('scopedAccountId') as string | undefined;
+    const lineAccountId = getScope(c);
     let items;
     if (lineAccountId) {
       const result = await c.env.DB

@@ -662,6 +662,8 @@ export interface StaffMember {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  /** True when this staff has completed LINE Login at least once (line_user_id is set). */
+  lineLinked: boolean;
 }
 
 export interface StaffProfile {
