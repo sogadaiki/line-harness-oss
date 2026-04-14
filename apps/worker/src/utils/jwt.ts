@@ -12,7 +12,7 @@ export interface JwtPayload {
 }
 
 const ALGORITHM = { name: 'HMAC', hash: 'SHA-256' } as const;
-const JWT_EXPIRY_SECONDS = 8 * 60 * 60; // 8 hours
+const JWT_EXPIRY_SECONDS = 30 * 24 * 60 * 60; // 30 days
 
 function base64UrlEncode(data: Uint8Array): string {
   let binary = '';

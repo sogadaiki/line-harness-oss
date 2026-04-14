@@ -203,7 +203,7 @@ function buildSessionRedirect(
   permissions: string[],
 ): Response {
   const url = new URL(workerUrl);
-  const maxAge = 8 * 60 * 60; // 8 hours
+  const maxAge = 30 * 24 * 60 * 60; // 30 days (match JWT_EXPIRY_SECONDS in utils/jwt.ts)
   // SameSite=None required so the cookie is sent on cross-origin fetch
   // from the admin Pages app (different hostname) to this worker.
   // Note: iOS Safari ITP blocks even SameSite=None cookies in cross-origin

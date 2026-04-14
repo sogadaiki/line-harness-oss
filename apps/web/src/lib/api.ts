@@ -69,6 +69,20 @@ function getBearerToken(): string {
   return ''
 }
 
+function clearSessionAndRedirectToLogin(): void {
+  if (typeof window === 'undefined') return
+  // Don't loop if we're already on the login page
+  if (window.location.pathname === '/login') return
+  // Clear all auth-related localStorage entries
+  localStorage.removeItem('lh_session_jwt')
+  localStorage.removeItem('lh_api_key')
+  localStorage.removeItem('lh_auth_type')
+  localStorage.removeItem('lh_staff_name')
+  localStorage.removeItem('lh_staff_role')
+  localStorage.removeItem('lh_permissions')
+  window.location.href = '/login'
+}
+
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getBearerToken()
   const headers: Record<string, string> = {
@@ -86,6 +100,11 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
     credentials: 'include',
     headers,
   })
+  // Session expired or invalid — clear auth and redirect to login
+  if (res.status === 401) {
+    clearSessionAndRedirectToLogin()
+    throw new Error('Session expired')
+  }
   if (!res.ok) throw new Error(`API error: ${res.status}`)
   return res.json() as Promise<T>
 }
