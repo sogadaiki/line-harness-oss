@@ -98,7 +98,8 @@ liffRoutes.get('/auth/line', async (c) => {
 
   // Build LIFF URL with ref + ad params (for mobile → LINE app)
   // Extract LIFF ID from URL and pass as query param so the app can init correctly
-  const liffIdMatch = liffUrl.match(/liff\.line\.me\/([0-9]+-[A-Za-z0-9]+)/);
+  // Null-safe: accounts without LIFF (liff_id NULL + LIFF_URL unset) fall through to OAuth-only flow
+  const liffIdMatch = liffUrl ? liffUrl.match(/liff\.line\.me\/([0-9]+-[A-Za-z0-9]+)/) : null;
   const liffParams = new URLSearchParams();
   if (liffIdMatch) liffParams.set('liffId', liffIdMatch[1]);
   if (externalRef) liffParams.set('ref', externalRef);
@@ -113,9 +114,9 @@ liffRoutes.get('/auth/line', async (c) => {
   if (twclid) liffParams.set('twclid', twclid);
   if (ttclid) liffParams.set('ttclid', ttclid);
   if (utmSource) liffParams.set('utm_source', utmSource);
-  const liffTarget = liffParams.toString()
-    ? `${liffUrl}?${liffParams.toString()}`
-    : liffUrl;
+  const liffTarget = liffUrl
+    ? (liffParams.toString() ? `${liffUrl}?${liffParams.toString()}` : liffUrl)
+    : null;
 
   // Build OAuth URL (for desktop fallback)
   // Pack all tracking params into state so they survive the OAuth redirect.
@@ -139,7 +140,10 @@ liffRoutes.get('/auth/line', async (c) => {
   if (formId) qrParams.set('form', formId);
   if (uidParam) qrParams.set('uid', uidParam);
   if (accountParam) qrParams.set('account', accountParam);
-  const qrUrl = qrParams.toString() ? `${liffUrl}?${qrParams.toString()}` : liffUrl;
+  // Accounts without LIFF: QR encodes the OAuth URL directly (no LIFF deep-link)
+  const qrUrl = liffUrl
+    ? (qrParams.toString() ? `${liffUrl}?${qrParams.toString()}` : liffUrl)
+    : loginUrl.toString();
 
   // Mobile: redirect to OAuth URL directly (more reliable than LIFF redirect)
   // LIFF redirect can fail with "Authorization failed" due to LIFF config issues,
@@ -151,6 +155,55 @@ liffRoutes.get('/auth/line', async (c) => {
   }
 
   // PC: show QR code page
+  // さだめ (channel_id=1660960833) は専用のライトテーマ + ブランド文言を返す
+  const isSadame = accountParam === '1660960833';
+  if (isSadame) {
+    return c.html(`<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>株式会社さだめ 公式LINE</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --sd-navy: #17184B;
+      --sd-cyan: #00BCD4;
+      --sd-navy-soft: rgba(23, 24, 75, 0.62);
+      --sd-navy-faint: rgba(23, 24, 75, 0.08);
+    }
+    body { font-family: 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif; background: #ffffff; color: var(--sd-navy); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 24px; }
+    .card { background: #ffffff; border: 1px solid var(--sd-navy-faint); border-radius: 20px; padding: 48px 40px; text-align: center; max-width: 480px; width: 100%; box-shadow: 0 4px 24px rgba(23, 24, 75, 0.06); }
+    .brand { font-size: 13px; font-weight: 700; color: var(--sd-cyan); letter-spacing: 0.12em; margin-bottom: 12px; }
+    h1 { font-size: 24px; font-weight: 800; margin-bottom: 10px; color: var(--sd-navy); letter-spacing: 0.02em; }
+    .sub { font-size: 14px; color: var(--sd-navy-soft); margin-bottom: 28px; line-height: 1.7; }
+    .qr { background: #ffffff; border: 1px solid var(--sd-navy-faint); border-radius: 14px; padding: 18px; display: inline-block; margin-bottom: 22px; }
+    .qr img { display: block; width: 240px; height: 240px; }
+    .hint { font-size: 13px; color: var(--sd-navy-soft); line-height: 1.7; }
+    .hint strong { color: var(--sd-navy); font-weight: 700; }
+    .divider { height: 1px; background: var(--sd-navy-faint); margin: 28px 0 20px; }
+    .footer { font-size: 12px; color: var(--sd-navy-soft); }
+    .footer a { color: var(--sd-navy); text-decoration: none; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <p class="brand">SADAME</p>
+    <h1>株式会社さだめ 公式LINE</h1>
+    <p class="sub">スマートフォンでQRコードを読み取り、<br>友だち追加してください。</p>
+    <div class="qr">
+      <img src="/api/qr?size=240x240&data=${encodeURIComponent(qrUrl)}" alt="QR Code">
+    </div>
+    <p class="hint">追加後、<strong>自動でご案内メッセージが届きます</strong>。</p>
+    <div class="divider"></div>
+    <p class="footer"><a href="https://sadame.info">sadame.info</a></p>
+  </div>
+</body>
+</html>`);
+  }
+
+  // Default LINE Harness OSS page (他テナント向け既存表示)
   return c.html(`<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -220,8 +273,9 @@ liffRoutes.get('/auth/callback', async (c) => {
     utmCampaign = parsed.utmCampaign || '';
     accountParam = parsed.account || '';
     uidParam = parsed.uid || '';
-  } catch {
-    // ignore
+    console.log('[auth/callback] state parsed OK:', { ref, accountParam, hasCode: !!code, stateLen: stateParam.length });
+  } catch (e) {
+    console.error('[auth/callback] state parse FAILED. stateParam (first 200):', stateParam.slice(0, 200), 'err:', String(e));
   }
 
   if (error || !code) {
