@@ -50,22 +50,34 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     try {
       const res = await api.lineAccounts.list()
       if (res.success && res.data.length > 0) {
-        const list = res.data as AccountWithStats[]
+        // NEXT_PUBLIC_ALLOWED_ACCOUNT_IDS (カンマ区切り) が設定されている管理画面では、
+        // そのリストに含まれる account_id だけを表示する。cross-tenant 誤配信を UI 層で防ぐ
+        // フィルタ（2026-04-23 CEO 判断、物理分離は別 PR で実施予定）。
+        const allowedRaw = process.env.NEXT_PUBLIC_ALLOWED_ACCOUNT_IDS
+        const allowed = allowedRaw
+          ? allowedRaw.split(',').map((s) => s.trim()).filter(Boolean)
+          : null
+        const fullList = res.data as AccountWithStats[]
+        const list = allowed ? fullList.filter((a) => allowed.includes(a.id)) : fullList
         setAccounts(list)
 
-        // If current selection is invalid (e.g. deleted), fall back to first
-        setSelectedAccountIdState((prev) => {
-          if (prev && list.some((a) => a.id === prev)) return prev
-          // Restore from localStorage or default to first
-          let stored: string | null = null
-          try {
-            stored = localStorage.getItem(STORAGE_KEY)
-          } catch {
-            // localStorage unavailable
-          }
-          const valid = stored && list.some((a) => a.id === stored)
-          return valid ? stored : list[0].id
-        })
+        if (list.length === 0) {
+          setSelectedAccountIdState(null)
+        } else {
+          // If current selection is invalid (e.g. deleted), fall back to first
+          setSelectedAccountIdState((prev) => {
+            if (prev && list.some((a) => a.id === prev)) return prev
+            // Restore from localStorage or default to first
+            let stored: string | null = null
+            try {
+              stored = localStorage.getItem(STORAGE_KEY)
+            } catch {
+              // localStorage unavailable
+            }
+            const valid = stored && list.some((a) => a.id === stored)
+            return valid ? stored : list[0].id
+          })
+        }
       } else {
         setAccounts([])
         setSelectedAccountIdState(null)
