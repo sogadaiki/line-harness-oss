@@ -8,10 +8,11 @@ import {
   updateBroadcastLineRequestId,
   createBroadcastInsight,
 } from '@line-crm/db';
-import type { Broadcast } from '@line-crm/db';
-import type { LineClient } from '@line-crm/line-sdk';
+import type { Broadcast, Friend } from '@line-crm/db';
+import { LineClient } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js';
+import { resolveDeliveryClient } from './line-client-resolver.js';
 
 const MULTICAST_BATCH_SIZE = 500;
 
@@ -60,45 +61,73 @@ export async function processBroadcastSend(
       const followingFriends = friends.filter((f) => f.is_following);
       totalCount = followingFriends.length;
 
-      // Send in batches with stealth delays to mimic human patterns
+      // Group friends by line_account_id so each group uses the correct LineClient.
+      // account_id → LineClient キャッシュで DB 呼び出しを最小化する
+      const clientCache = new Map<string, LineClient>();
+      const grouped = new Map<string | null, Friend[]>();
+      for (const f of followingFriends) {
+        const key = f.line_account_id;
+        const existing = grouped.get(key) ?? [];
+        existing.push(f);
+        grouped.set(key, existing);
+      }
+
       const now = jstNow();
-      const totalBatches = Math.ceil(followingFriends.length / MULTICAST_BATCH_SIZE);
       const unit = `bcast_${broadcast.id.slice(0, 8)}`;
-      for (let i = 0; i < followingFriends.length; i += MULTICAST_BATCH_SIZE) {
-        const batchIndex = Math.floor(i / MULTICAST_BATCH_SIZE);
-        const batch = followingFriends.slice(i, i + MULTICAST_BATCH_SIZE);
-        const lineUserIds = batch.map((f) => f.line_user_id);
+      let globalBatchIndex = 0;
+      const totalBatches = Math.ceil(followingFriends.length / MULTICAST_BATCH_SIZE);
 
-        // Stealth: add staggered delay between batches
-        if (batchIndex > 0) {
-          const delay = calculateStaggerDelay(followingFriends.length, batchIndex);
-          await sleep(delay);
-        }
-
-        // Stealth: add slight variation to text messages
-        let batchMessage = message;
-        if (message.type === 'text' && totalBatches > 1) {
-          batchMessage = { ...message, text: addMessageVariation(message.text, batchIndex) };
-        }
-
-        try {
-          await lineClient.multicast(lineUserIds, [batchMessage], [unit]);
-          successCount += batch.length;
-
-          // Log only successfully sent messages
-          for (const friend of batch) {
-            const logId = crypto.randomUUID();
-            await db
-              .prepare(
-                `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
-                 VALUES (?, ?, 'outgoing', ?, ?, ?, NULL, ?)`,
-              )
-              .bind(logId, friend.id, broadcast.message_type, broadcast.message_content, broadcastId, now)
-              .run();
+      for (const [accountId, groupFriends] of grouped) {
+        // Resolve client for this account group (with cache)
+        let groupClient: LineClient;
+        if (accountId) {
+          if (clientCache.has(accountId)) {
+            groupClient = clientCache.get(accountId)!;
+          } else {
+            groupClient = await resolveDeliveryClient(db, accountId, lineClient);
+            clientCache.set(accountId, groupClient);
           }
-        } catch (err) {
-          console.error(`Multicast batch ${i / MULTICAST_BATCH_SIZE} failed:`, err);
-          // Continue with next batch; failed batch is not logged
+        } else {
+          groupClient = lineClient;
+        }
+
+        for (let i = 0; i < groupFriends.length; i += MULTICAST_BATCH_SIZE) {
+          const batchIndex = globalBatchIndex;
+          globalBatchIndex++;
+          const batch = groupFriends.slice(i, i + MULTICAST_BATCH_SIZE);
+          const lineUserIds = batch.map((f) => f.line_user_id);
+
+          // Stealth: add staggered delay between batches
+          if (batchIndex > 0) {
+            const delay = calculateStaggerDelay(followingFriends.length, batchIndex);
+            await sleep(delay);
+          }
+
+          // Stealth: add slight variation to text messages
+          let batchMessage = message;
+          if (message.type === 'text' && totalBatches > 1) {
+            batchMessage = { ...message, text: addMessageVariation(message.text, batchIndex) };
+          }
+
+          try {
+            await groupClient.multicast(lineUserIds, [batchMessage], [unit]);
+            successCount += batch.length;
+
+            // Log only successfully sent messages
+            for (const friend of batch) {
+              const logId = crypto.randomUUID();
+              await db
+                .prepare(
+                  `INSERT INTO messages_log (id, friend_id, direction, message_type, content, broadcast_id, scenario_step_id, created_at)
+                   VALUES (?, ?, 'outgoing', ?, ?, ?, NULL, ?)`,
+                )
+                .bind(logId, friend.id, broadcast.message_type, broadcast.message_content, broadcastId, now)
+                .run();
+            }
+          } catch (err) {
+            console.error(`Multicast batch ${batchIndex} failed:`, err);
+            // Continue with next batch; failed batch is not logged
+          }
         }
       }
       await updateBroadcastLineRequestId(db, broadcast.id, null, unit);
@@ -131,9 +160,25 @@ export async function processScheduledBroadcasts(
       new Date(b.scheduled_at).getTime() <= nowMs,
   );
 
+  // account_id → LineClient キャッシュで DB 呼び出しを最小化する
+  const clientCache = new Map<string, LineClient>();
+
   for (const broadcast of scheduled) {
     try {
-      await processBroadcastSend(db, lineClient, broadcast.id, workerUrl);
+      // broadcast.line_account_id でアカウント固有 client を解決
+      const broadcastAccountId = (broadcast as unknown as Record<string, unknown>).line_account_id as string | null;
+      let broadcastClient: LineClient;
+      if (broadcastAccountId) {
+        if (clientCache.has(broadcastAccountId)) {
+          broadcastClient = clientCache.get(broadcastAccountId)!;
+        } else {
+          broadcastClient = await resolveDeliveryClient(db, broadcastAccountId, lineClient);
+          clientCache.set(broadcastAccountId, broadcastClient);
+        }
+      } else {
+        broadcastClient = lineClient;
+      }
+      await processBroadcastSend(db, broadcastClient, broadcast.id, workerUrl);
     } catch (err) {
       console.error(`Failed to send scheduled broadcast ${broadcast.id}:`, err);
       // Continue with next broadcast

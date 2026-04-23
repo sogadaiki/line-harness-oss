@@ -63,6 +63,9 @@ export type Env = {
     SESSION_SECRET?: string;
     SCOPED_LINE_ACCOUNT_ID?: string;
     X_HARNESS_URL?: string;
+    // カンマ区切りで許可オリジンを列挙する (wrangler secret で設定)
+    // 未設定時は credentials=false に縮退し origin='*' で動作する
+    ALLOWED_ORIGINS?: string;
   };
   Variables: {
     staff: { id: string; name: string; role: 'owner' | 'admin' | 'staff' };
@@ -72,11 +75,25 @@ export type Env = {
 
 const app = new Hono<Env>();
 
-// CORS — reflect request origin to support credentials (cookies)
-app.use('*', cors({
-  origin: (origin) => origin || '*',
-  credentials: true,
-}));
+// CORS — ホワイトリストにマッチしたオリジンのみ credentials=true でエコー返しする。
+// ALLOWED_ORIGINS 未設定時は credentials=false に縮退し origin='*' で動作する
+// (public read は機能するが cookie は cross-origin で送信されない)。
+// 本番設定: wrangler secret put ALLOWED_ORIGINS --config wrangler.toml
+app.use('*', async (c, next) => {
+  const allowedRaw = c.env.ALLOWED_ORIGINS;
+  if (allowedRaw) {
+    const allowed = allowedRaw.split(',').map((s) => s.trim()).filter(Boolean);
+    return cors({
+      origin: (origin) => (allowed.includes(origin) ? origin : null),
+      credentials: true,
+    })(c, next);
+  }
+  // 未設定時: credentials なし縮退モード
+  return cors({
+    origin: '*',
+    credentials: false,
+  })(c, next);
+});
 
 // Rate limiting — runs before auth to block abuse early
 app.use('*', rateLimitMiddleware);

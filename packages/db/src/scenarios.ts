@@ -417,3 +417,49 @@ export async function completeFriendScenario(
     .bind(now, id)
     .run();
 }
+
+/**
+ * 指定 friend の指定 scenario の active な friend_scenario を paused に更新する。
+ * 対象が存在しない、または既に paused/completed の場合は no-op（0行UPDATE）。
+ * automation の pause_scenario アクションから呼び出す（friendId + scenarioId 引き）。
+ */
+export async function pauseFriendScenarioByFriendAndScenario(
+  db: D1Database,
+  friendId: string,
+  scenarioId: string,
+): Promise<void> {
+  const now = jstNow();
+  await db
+    .prepare(
+      `UPDATE friend_scenarios
+       SET status = 'paused',
+           updated_at = ?
+       WHERE friend_id = ? AND scenario_id = ? AND status = 'active'`,
+    )
+    .bind(now, friendId, scenarioId)
+    .run();
+}
+
+/**
+ * 指定 friend の指定 scenario の active または paused な friend_scenario を completed に更新する。
+ * 対象が存在しない、または既に completed の場合は no-op（0行UPDATE）。
+ * automation の complete_scenario アクションから呼び出す（friendId + scenarioId 引き）。
+ * paused のものも completed にできる（面談完了時のブッチフォロー停止用途）。
+ */
+export async function completeFriendScenarioByFriendAndScenario(
+  db: D1Database,
+  friendId: string,
+  scenarioId: string,
+): Promise<void> {
+  const now = jstNow();
+  await db
+    .prepare(
+      `UPDATE friend_scenarios
+       SET status = 'completed',
+           next_delivery_at = NULL,
+           updated_at = ?
+       WHERE friend_id = ? AND scenario_id = ? AND status != 'completed'`,
+    )
+    .bind(now, friendId, scenarioId)
+    .run();
+}

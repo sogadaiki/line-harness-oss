@@ -20,6 +20,8 @@ import {
   addTagToFriend,
   removeTagFromFriend,
   enrollFriendInScenario,
+  pauseFriendScenarioByFriendAndScenario,
+  completeFriendScenarioByFriendAndScenario,
   jstNow,
   getFriendScore,
 } from '@line-crm/db';
@@ -286,6 +288,26 @@ async function executeAction(
     case 'start_scenario':
       await enrollFriendInScenario(db, friendId!, action.params.scenarioId);
       break;
+
+    case 'pause_scenario': {
+      const scenarioId = action.params.scenarioId;
+      if (typeof scenarioId !== 'string' || scenarioId.length === 0) {
+        throw new Error('pause_scenario requires scenarioId');
+      }
+      if (!friendId) throw new Error('pause_scenario requires friendId');
+      await pauseFriendScenarioByFriendAndScenario(db, friendId, scenarioId);
+      break;
+    }
+
+    case 'complete_scenario': {
+      const scenarioId = action.params.scenarioId;
+      if (typeof scenarioId !== 'string' || scenarioId.length === 0) {
+        throw new Error('complete_scenario requires scenarioId');
+      }
+      if (!friendId) throw new Error('complete_scenario requires friendId');
+      await completeFriendScenarioByFriendAndScenario(db, friendId, scenarioId);
+      break;
+    }
 
     case 'send_message': {
       if (!lineAccessToken || !friendId) break;

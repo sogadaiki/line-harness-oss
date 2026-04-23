@@ -16,6 +16,7 @@ import {
 } from '@line-crm/db';
 import type { LineClient, Message } from '@line-crm/line-sdk';
 import { addJitter, sleep } from './stealth.js';
+import { resolveDeliveryClient } from './line-client-resolver.js';
 
 export async function processReminderDeliveries(
   db: D1Database,
@@ -38,9 +39,12 @@ export async function processReminderDeliveries(
         continue;
       }
 
+      // フレンドの line_account_id から正しい LINE クライアントを解決する
+      const deliveryClient = await resolveDeliveryClient(db, friend.line_account_id, lineClient);
+
       for (const step of fr.steps) {
         const message = buildMessage(step.message_type, step.message_content);
-        await lineClient.pushMessage(friend.line_user_id, [message]);
+        await deliveryClient.pushMessage(friend.line_user_id, [message]);
 
         // メッセージログに記録
         const logId = crypto.randomUUID();

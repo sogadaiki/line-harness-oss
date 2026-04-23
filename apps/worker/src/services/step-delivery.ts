@@ -253,7 +253,13 @@ async function processSingleDelivery(
   // RETURNING returns null if ON CONFLICT fired (duplicate) — only winner gets a row
   if (!insertResult) return;
 
-  await deliveryClient.pushMessage(friend.line_user_id, [message]);
+  // LINE API 失敗時はログを削除して次の cron で再試行可能にする (外部境界なので try/catch 許可)
+  try {
+    await deliveryClient.pushMessage(friend.line_user_id, [message]);
+  } catch (err) {
+    await db.prepare(`DELETE FROM messages_log WHERE id = ?`).bind(insertResult.id).run();
+    throw err;
+  }
 
   // Determine next step (find the step after currentStep in the sorted list)
   const currentIndex = steps.indexOf(currentStep);

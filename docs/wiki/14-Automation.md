@@ -71,13 +71,15 @@ CREATE INDEX idx_automation_logs_automation ON automation_logs (automation_id);
 | `calendar_booked` | カレンダー予約 | `friendId`, `eventData` |
 | `incoming_webhook.*` | 外部Webhook受信 | `eventData.webhookId`, `eventData.source`, `eventData.payload` |
 
-## アクションタイプ（8種）
+## アクションタイプ（10種）
 
 | type | params | 説明 |
 |---|---|---|
 | `add_tag` | `{ tagId: string }` | タグを付与 |
 | `remove_tag` | `{ tagId: string }` | タグを削除 |
 | `start_scenario` | `{ scenarioId: string }` | シナリオに登録 |
+| `pause_scenario` | `{ scenarioId: string }` | 指定シナリオの active な friend_scenario を paused に更新。既に paused/completed の場合は no-op |
+| `complete_scenario` | `{ scenarioId: string }` | 指定シナリオの active または paused な friend_scenario を completed に更新。既に completed の場合は no-op |
 | `send_message` | `{ content: string, messageType?: string, altText?: string }` | LINE メッセージ送信。`messageType` は `text`（デフォルト）または `flex` |
 | `send_webhook` | `{ url: string }` | 外部URLにPOSTリクエスト |
 | `switch_rich_menu` | `{ richMenuId: string }` | リッチメニューを切替 |
@@ -394,6 +396,44 @@ friend_add → [auto-1: add_tag "セミナー参加者"]
 ```
 
 ただし無限ループに注意。循環参照する条件を設定しないこと。
+
+### パターン5: タグ付与でシナリオを停止する
+
+特定タグが付与された時点で、進行中のナーチャリングシナリオを自動停止する。ECの「購入済タグ」でマーケメール停止、求人の「面談予約済タグ」でフォローシナリオ停止など汎用的に使える。
+
+```bash
+# タグ付与 → シナリオ一時停止（paused: 後で再開可能）
+curl -X POST ".../api/automations" -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "特定タグ付与→シナリオ停止",
+    "eventType": "tag_change",
+    "conditions": { "tag_id": "your-tag-uuid" },
+    "actions": [
+      { "type": "pause_scenario", "params": { "scenarioId": "your-scenario-uuid" } }
+    ],
+    "priority": 50
+  }'
+
+# タグ付与 → シナリオ完了（completed: 同一シナリオへの再登録が可能）
+curl -X POST ".../api/automations" -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "特定タグ付与→シナリオ完了",
+    "eventType": "tag_change",
+    "conditions": { "tag_id": "your-tag-uuid" },
+    "actions": [
+      { "type": "complete_scenario", "params": { "scenarioId": "your-scenario-uuid" } }
+    ],
+    "priority": 50
+  }'
+```
+
+**`pause_scenario` と `complete_scenario` の使い分け:**
+- `pause_scenario`: 対象の `status='active'` な friend_scenario を `paused` に変更。後で手動での復帰余地を残したい場合に使う
+- `complete_scenario`: 対象の `status` が `active` または `paused` な friend_scenario を `completed` に変更。`completed` になると同一シナリオへの新規登録（`start_scenario`）が再び可能になる
+
+**注意:** `conditions.tag_id` はタグ付与・タグ削除の両方で発火する `tag_change` イベントを対象にする。現時点の実装は `tag_id` 一致のみ判定し `action: 'add'|'remove'` の区別を行わない。タグ削除運用がある場合は別途オートメーション設計を検討すること。
 
 ## ソースコード参照
 

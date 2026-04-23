@@ -215,6 +215,7 @@ forms.post('/api/forms/:id/submit', async (c) => {
       lineUserId?: string;
       friendId?: string;
       data?: Record<string, unknown>;
+      _skipWebhook?: boolean;
     }>();
 
     const submissionData = body.data ?? {};

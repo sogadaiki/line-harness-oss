@@ -9,7 +9,7 @@ import CcPromptButton from '@/components/cc-prompt-button'
 type AutomationEventType = "friend_add" | "tag_change" | "score_threshold" | "cv_fire" | "message_received" | "calendar_booked"
 
 interface AutomationAction {
-  type: "add_tag" | "remove_tag" | "start_scenario" | "send_message" | "send_webhook" | "switch_rich_menu"
+  type: "add_tag" | "remove_tag" | "start_scenario" | "pause_scenario" | "complete_scenario" | "send_message" | "send_webhook" | "switch_rich_menu"
   params: Record<string, unknown>
 }
 
@@ -250,7 +250,7 @@ export default function AutomationsPage() {
               <textarea
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
                 rows={6}
-                placeholder='[{"type": "add_tag", "params": {"tagId": "..."}}]'
+                placeholder='[{"type": "add_tag", "params": {"tagId": "..."}}, {"type": "pause_scenario", "params": {"scenarioId": "..."}}, {"type": "complete_scenario", "params": {"scenarioId": "..."}}]'
                 value={form.actionsJson}
                 onChange={(e) => setForm({ ...form, actionsJson: e.target.value })}
               />

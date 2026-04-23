@@ -623,7 +623,7 @@ export type AutomationEventType =
   | "calendar_booked";
 
 export interface AutomationAction {
-  type: "add_tag" | "remove_tag" | "start_scenario" | "send_message" | "send_webhook" | "switch_rich_menu";
+  type: "add_tag" | "remove_tag" | "start_scenario" | "pause_scenario" | "complete_scenario" | "send_message" | "send_webhook" | "switch_rich_menu";
   params: Record<string, unknown>;
 }
 

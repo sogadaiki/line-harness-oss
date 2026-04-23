@@ -71,7 +71,7 @@ webhook.post('/webhook', async (c) => {
   const processingPromise = (async () => {
     for (const event of body.events) {
       try {
-        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin);
+        await handleEvent(db, lineClient, event, channelAccessToken, matchedAccountId, c.env.WORKER_URL || new URL(c.req.url).origin, c.env.LIFF_URL);
       } catch (err) {
         console.error('Error handling webhook event:', err);
       }
@@ -90,13 +90,12 @@ async function handleEvent(
   lineAccessToken: string,
   lineAccountId: string | null = null,
   workerUrl?: string,
+  liffUrl?: string,
 ): Promise<void> {
   if (event.type === 'follow') {
     const userId =
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
-
-    console.log(`[follow] userId=${userId} lineAccountId=${lineAccountId}`);
 
     // プロフィール取得 & 友だち登録/更新
     let profile;
@@ -106,8 +105,6 @@ async function handleEvent(
       console.error('Failed to get profile for', userId, err);
     }
 
-    console.log(`[follow] profile=${profile?.displayName ?? 'null'}`);
-
     const friend = await upsertFriend(db, {
       lineUserId: userId,
       displayName: profile?.displayName ?? null,
@@ -115,13 +112,10 @@ async function handleEvent(
       statusMessage: profile?.statusMessage ?? null,
     });
 
-    console.log(`[follow] friend.id=${friend.id} friend.line_account_id=${(friend as any).line_account_id}`);
-
     // Set line_account_id for multi-account tracking (always update on follow)
     if (lineAccountId) {
       await db.prepare('UPDATE friends SET line_account_id = ?, updated_at = ? WHERE id = ?')
         .bind(lineAccountId, jstNow(), friend.id).run();
-      console.log(`[follow] line_account_id set to ${lineAccountId} for friend ${friend.id}`);
     }
 
     // friend_add シナリオに登録（このアカウントのシナリオのみ）
@@ -148,7 +142,6 @@ async function handleEvent(
                 const expandedContent = expandVariables(firstStep.message_content, { ...friend, metadata: resolvedMeta } as Parameters<typeof expandVariables>[1]);
                 const message = buildMessage(firstStep.message_type, expandedContent);
                 await lineClient.replyMessage(event.replyToken, [message]);
-                console.log(`Immediate delivery: sent step ${firstStep.id} to ${userId}`);
 
                 // Log outgoing message (replyMessage = 無料)
                 const logId = crypto.randomUUID();
@@ -453,7 +446,7 @@ async function handleEvent(
               footer: { type: 'box', layout: 'vertical', paddingAll: '16px',
                 contents: [
                   { type: 'button', action: { type: 'message', label: '導入について相談する', text: '導入支援を希望します' }, style: 'primary', color: '#06C755' },
-                  ...(c.env.LIFF_URL ? [{ type: 'button', action: { type: 'uri', label: 'フィードバックを送る', uri: `${c.env.LIFF_URL}?page=form` }, style: 'secondary', margin: 'sm' }] : []),
+                  ...(liffUrl ? [{ type: 'button', action: { type: 'uri', label: 'フィードバックを送る', uri: `${liffUrl}?page=form` }, style: 'secondary', margin: 'sm' }] : []),
                 ],
               },
             }))]);
