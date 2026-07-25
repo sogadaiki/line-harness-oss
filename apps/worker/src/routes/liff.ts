@@ -155,6 +155,54 @@ liffRoutes.get('/auth/line', async (c) => {
   }
 
   // PC: show QR code page
+  // ヒナタマ熊本 (channel_id=2009555191) は求人LPからのPC流入向け表示にする
+  const isHinatama = accountParam === '2009555191';
+  if (isHinatama) {
+    return c.html(`<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>ヒナタマ熊本 LINE応募・相談</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --hn-ink: #30233a;
+      --hn-muted: rgba(48, 35, 58, 0.66);
+      --hn-pink: #e95689;
+      --hn-line: #06c755;
+      --hn-cream: #fff8ef;
+      --hn-border: rgba(233, 86, 137, 0.16);
+    }
+    body { font-family: 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif; background: linear-gradient(180deg, #fff8ef 0%, #fff 58%, #f7fff9 100%); color: var(--hn-ink); display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 24px; }
+    .card { background: rgba(255,255,255,0.96); border: 1px solid var(--hn-border); border-radius: 20px; padding: 42px 36px; text-align: center; max-width: 500px; width: 100%; box-shadow: 0 18px 48px rgba(48,35,58,0.10); }
+    .brand { color: var(--hn-pink); font-size: 13px; font-weight: 800; letter-spacing: 0.12em; margin-bottom: 10px; }
+    h1 { font-size: 25px; font-weight: 800; line-height: 1.45; margin-bottom: 10px; }
+    .sub { font-size: 14px; color: var(--hn-muted); line-height: 1.8; margin-bottom: 26px; }
+    .qr { background: #fff; border: 1px solid rgba(6,199,85,0.18); border-radius: 16px; padding: 20px; display: inline-block; margin-bottom: 22px; box-shadow: 0 8px 24px rgba(6,199,85,0.08); }
+    .qr img { display: block; width: 240px; height: 240px; }
+    .hint { font-size: 13px; color: var(--hn-muted); line-height: 1.7; margin-bottom: 18px; }
+    .line-badge { display: inline-block; padding: 9px 18px; border-radius: 999px; color: #fff; background: var(--hn-line); font-size: 13px; font-weight: 800; }
+    .note { margin-top: 20px; color: rgba(48,35,58,0.48); font-size: 12px; line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <p class="brand">HINATAMA KUMAMOTO</p>
+    <h1>ヒナタマ熊本<br>LINE応募・相談</h1>
+    <p class="sub">スマートフォンでQRコードを読み取り、<br>LINEから応募または相談してください。</p>
+    <div class="qr">
+      <img src="/api/qr?size=240x240&data=${encodeURIComponent(qrUrl)}" alt="ヒナタマ熊本 LINE応募・相談 QRコード">
+    </div>
+    <p class="hint">LINEアプリのカメラ、または<br>スマートフォンのカメラで読み取れます。</p>
+    <span class="line-badge">LINEで応募・相談する</span>
+    <p class="note">スマートフォンからアクセスした場合は、LINEの友だち追加画面へ進みます。</p>
+  </main>
+</body>
+</html>`);
+  }
+
   // さだめ (channel_id=1660960833) は専用のライトテーマ + ブランド文言を返す
   const isSadame = accountParam === '1660960833';
   if (isSadame) {

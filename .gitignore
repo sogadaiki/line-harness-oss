@@ -3,16 +3,25 @@ dist/
 .next/
 .wrangler/
 .vercel/
-.env
-.env.local
+# CRITICAL (2026-07-26): 完全一致では派生ファイルを取りこぼす。
+# 実際 apps/web/.env.hinatama と apps/web/.env.production.local が
+# untracked のまま git add -A 一発で commit できる状態だった（履歴汚染は無し）。
+# 以後は .env* を丸ごと除外し、example だけ明示的に許可する。
+.env*
+!.env.example
+!.env.*.example
 *.log
 .DS_Store
 .mcp.json
 *.toml.bak
-.env.production
-.env.staging
 apps/web/out/
 apps/worker/dist/
 restart/
 restart.md
 restart/
+
+# CLI オプションのタイプミスで生まれたファイル
+# 例: `--full-page` がファイル名として解釈されたもの。中身はスクショ。
+# 消してよいが、削除は人の判断に任せるため追跡だけ止める
+apps/web/--full-page
+DESIGN.md
