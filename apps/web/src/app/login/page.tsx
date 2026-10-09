@@ -62,7 +62,7 @@ function LoginPageInner() {
     setError('')
 
     try {
-      const res = await fetch(`${API_URL}/api/friends/count`, {
+      const res = await fetch(`${API_URL}/api/staff/me`, {
         headers: { Authorization: `Bearer ${apiKey}` },
       })
 

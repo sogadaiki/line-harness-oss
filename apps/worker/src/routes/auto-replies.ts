@@ -75,7 +75,7 @@ autoReplies.post('/api/auto-replies', async (c) => {
       matchType: body.matchType,
       responseType: body.responseType,
       responseContent: body.responseContent,
-      lineAccountId: body.lineAccountId ?? null,
+      lineAccountId: getScope(c),
     });
 
     return c.json({ success: true, data: serializeAutoReply(item) }, 201);
@@ -103,7 +103,6 @@ autoReplies.put('/api/auto-replies/:id', async (c) => {
     if (body.matchType !== undefined) input.matchType = body.matchType;
     if (body.responseType !== undefined) input.responseType = body.responseType;
     if (body.responseContent !== undefined) input.responseContent = body.responseContent;
-    if ('lineAccountId' in body) input.lineAccountId = body.lineAccountId;
     if (body.isActive !== undefined) input.isActive = body.isActive;
 
     const updated = await updateAutoReply(c.env.DB, id, input as Parameters<typeof updateAutoReply>[2]);

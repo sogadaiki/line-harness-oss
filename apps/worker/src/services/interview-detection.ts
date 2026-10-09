@@ -138,6 +138,9 @@ export async function processInterviewDateDetection(
   lineClient: LineClient,
   replyToken: string,
 ): Promise<boolean> {
+  if (!lineAccountId) return false;
+  const owner = await db.prepare('SELECT id FROM friends WHERE id=? AND line_account_id=?').bind(friendId,lineAccountId).first();
+  if (!owner) return false;
   // 面談予約済タグを持っているか確認
   const tags = await getFriendTags(db, friendId);
   const hasBookedTag = tags.some(t => t.name === INTERVIEW_BOOKED_TAG);
@@ -164,7 +167,8 @@ export async function processInterviewDateDetection(
 
   // リマインダに登録（「面談フォロー」リマインダを検索）
   const reminder = await db
-    .prepare(`SELECT id FROM reminders WHERE name = '面談フォロー' AND is_active = 1${lineAccountId ? ` AND line_account_id = '${lineAccountId}'` : ''} LIMIT 1`)
+    .prepare(`SELECT id FROM reminders WHERE name = '面談フォロー' AND is_active = 1 AND line_account_id = ? LIMIT 1`)
+    .bind(lineAccountId)
     .first<{ id: string }>();
 
   if (reminder) {

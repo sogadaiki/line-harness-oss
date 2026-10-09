@@ -160,8 +160,8 @@ export default function AutomationsPage() {
       } else {
         setFormError(res.error)
       }
-    } catch {
-      setFormError('作成に失敗しました')
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : '作成に失敗しました')
     } finally {
       setSaving(false)
     }
@@ -260,7 +260,7 @@ export default function AutomationsPage() {
               <textarea
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-500 resize-y"
                 rows={3}
-                placeholder='{"tagId": "...", "operator": "equals"}'
+                placeholder='{"tag_id": "..."}'
                 value={form.conditionsJson}
                 onChange={(e) => setForm({ ...form, conditionsJson: e.target.value })}
               />

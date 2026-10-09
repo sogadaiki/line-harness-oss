@@ -90,12 +90,12 @@ export async function getNotifications(db: D1Database, opts: { status?: string; 
 
 export async function createNotification(
   db: D1Database,
-  input: { ruleId?: string; eventType: string; title: string; body: string; channel: string; metadata?: string },
+  input: { ruleId?: string; eventType: string; title: string; body: string; channel: string; metadata?: string; lineAccountId?: string },
 ): Promise<NotificationRow> {
   const id = crypto.randomUUID();
   const now = jstNow();
-  await db.prepare(`INSERT INTO notifications (id, rule_id, event_type, title, body, channel, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-    .bind(id, input.ruleId ?? null, input.eventType, input.title, input.body, input.channel, input.metadata ?? null, now).run();
+  await db.prepare(`INSERT INTO notifications (id, rule_id, event_type, title, body, channel, metadata, line_account_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, input.ruleId ?? null, input.eventType, input.title, input.body, input.channel, input.metadata ?? null, input.lineAccountId ?? null, now).run();
   return (await db.prepare(`SELECT * FROM notifications WHERE id = ?`).bind(id).first<NotificationRow>())!;
 }
 

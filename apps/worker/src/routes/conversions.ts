@@ -128,6 +128,7 @@ conversions.post('/api/conversions/track', async (c) => {
 conversions.get('/api/conversions/events', async (c) => {
   try {
     const events = await getConversionEvents(c.env.DB, {
+      lineAccountId: getScope(c),
       conversionPointId: c.req.query('conversionPointId'),
       friendId: c.req.query('friendId'),
       affiliateCode: c.req.query('affiliateCode'),
@@ -159,6 +160,7 @@ conversions.get('/api/conversions/events', async (c) => {
 conversions.get('/api/conversions/report', async (c) => {
   try {
     const report = await getConversionReport(c.env.DB, {
+      lineAccountId: getScope(c),
       startDate: c.req.query('startDate'),
       endDate: c.req.query('endDate'),
     });

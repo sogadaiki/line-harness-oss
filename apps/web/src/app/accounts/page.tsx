@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { useAccount } from '@/contexts/account-context'
 
 interface LineAccountListItem {
   id: string
@@ -42,6 +43,7 @@ const ccPrompts = [
 ]
 
 export default function AccountsPage() {
+  const {accounts: allowedAccounts, selectedAccountId, refreshAccounts} = useAccount()
   const [accounts, setAccounts] = useState<LineAccountListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -54,7 +56,7 @@ export default function AccountsPage() {
     try {
       const res = await api.lineAccounts.list()
       if (res.success) {
-        setAccounts(res.data as unknown as LineAccountListItem[])
+        setAccounts((res.data as unknown as LineAccountListItem[]).filter(account => allowedAccounts.some(allowed => allowed.id === account.id)))
       } else {
         setError('アカウント情報の取得に失敗しました')
       }
@@ -84,7 +86,9 @@ export default function AccountsPage() {
   }
 
   const handleToggle = async (id: string, currentActive: boolean) => {
+    if (id !== selectedAccountId) { setError('左上で操作するアカウントを選択してください'); return }
     await api.lineAccounts.update(id, { isActive: !currentActive })
+    await refreshAccounts()
     load()
   }
 
@@ -92,7 +96,7 @@ export default function AccountsPage() {
     <div>
       <Header
         title="LINEアカウント管理"
-        description="マルチアカウント設定"
+        description="ログイン権限と表示設定で許可されたLINEのみ表示。操作するLINEを左上で選択してください。"
         action={
           <button
             onClick={() => setShowCreate(!showCreate)}

@@ -50,12 +50,14 @@ async function createTrackingMap(
   db: D1Database,
   urls: Set<string>,
   workerUrl: string,
+  lineAccountId: string,
 ): Promise<Map<string, { trackingUrl: string; originalUrl: string; label: string }>> {
   const urlMap = new Map<string, { trackingUrl: string; originalUrl: string; label: string }>();
   for (const url of urls) {
     const link = await createTrackedLink(db, {
       name: `auto: ${url.slice(0, 60)}`,
       originalUrl: url,
+      lineAccountId,
     });
     // Use direct /t/ URL — Worker handles LINE app detection and LIFF redirect server-side
     const trackingUrl = `${workerUrl}/t/${link.id}`;
@@ -142,13 +144,15 @@ export async function autoTrackContent(
   messageType: string,
   content: string,
   workerUrl: string,
+  lineAccountId: string,
 ): Promise<AutoTrackResult> {
   if (messageType === 'image') return { messageType, content };
 
   const urls = extractUrls(content);
   if (urls.size === 0) return { messageType, content };
 
-  const urlMap = await createTrackingMap(db, urls, workerUrl);
+  if (!lineAccountId) throw new Error('Tracking link account is required');
+  const urlMap = await createTrackingMap(db, urls, workerUrl, lineAccountId);
 
   // Text messages → convert to Flex with buttons
   if (messageType === 'text') {

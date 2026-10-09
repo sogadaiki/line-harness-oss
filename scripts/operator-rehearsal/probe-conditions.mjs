@@ -2,14 +2,14 @@
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import assert from 'node:assert/strict';
 
-const source = readFileSync(new URL('../../apps/worker/src/services/event-bus.ts', import.meta.url), 'utf8');
-const start = source.indexOf('function matchConditions(');
-const end = source.indexOf('/** アクション実行 */', start);
-if (start < 0 || end < 0) throw new Error('Matcher boundaries changed; review source.');
-const javascript = ts.transpileModule(source.slice(start, end), {
-  compilerOptions: { target: ts.ScriptTarget.ES2022 },
+const source = readFileSync(new URL('../../apps/worker/src/utils/automation-conditions.ts', import.meta.url), 'utf8');
+const javascript = ts.transpileModule(source, {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module:ts.ModuleKind.CommonJS },
 }).outputText;
+const context={exports:{}};
+runInNewContext(javascript,context);
 const probes = [
   { label: 'UIの入力例: tagId=A, 実イベントはB', conditions: { tagId: 'A', operator: 'equals' }, payload: { eventData: { tagId: 'B' } }, expectedForOperator: false },
   { label: '実装のキー: tag_id=A, 実イベントはB', conditions: { tag_id: 'A' }, payload: { eventData: { tagId: 'B' } }, expectedForOperator: false },
@@ -17,7 +17,8 @@ const probes = [
   { label: '未対応キーだけを指定', conditions: { made_up_condition: true }, payload: { eventData: {} }, expectedForOperator: false },
 ];
 const results = probes.map(p => {
-  const matches = runInNewContext(javascript + '\nmatchConditions(conditions, payload)', { conditions: p.conditions, payload: p.payload });
+  const matches = context.exports.matchConditions(p.conditions,p.payload);
+  assert.equal(matches,p.expectedForOperator,p.label);
   return { ...p, observedMatch: matches, matchesOperatorExpectation: matches === p.expectedForOperator };
 });
-console.log(JSON.stringify({ source: 'apps/worker/src/services/event-bus.ts', evidence: 'actual source matcher, fictional events, no delivery', results }, null, 2));
+console.log(JSON.stringify({ source: 'apps/worker/src/utils/automation-conditions.ts', evidence: 'actual repaired source matcher, fictional events, assertions, no delivery', results }, null, 2));

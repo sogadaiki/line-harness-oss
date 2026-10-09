@@ -17,6 +17,7 @@ import {
   getEntryRouteByRefCode,
   recordRefTracking,
   jstNow,
+  isScenarioDeliveryAllowed,
 } from '@line-crm/db';
 import { fireEvent } from '../services/event-bus.js';
 import { buildMessage, expandVariables } from '../services/step-delivery.js';
@@ -38,33 +39,27 @@ webhook.post('/webhook', async (c) => {
     return c.json({ status: 'ok' }, 200);
   }
 
-  // Multi-account: resolve credentials from DB by destination (channel user ID)
-  // or fall back to environment variables (default account)
-  let channelSecret = c.env.LINE_CHANNEL_SECRET;
-  let channelAccessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
-  let matchedAccountId: string | null = null;
-
-  if ((body as { destination?: string }).destination) {
+  // A verified DB account is mandatory. A scoped worker never tries other secrets.
+  let matchedAccount: Awaited<ReturnType<typeof getLineAccounts>>[number] | undefined;
+  {
     const accounts = await getLineAccounts(db);
     for (const account of accounts) {
-      if (!account.is_active) continue;
+      if (!account.is_active || (c.env.SCOPED_LINE_ACCOUNT_ID && account.id !== c.env.SCOPED_LINE_ACCOUNT_ID)) continue;
       const isValid = await verifySignature(account.channel_secret, rawBody, signature);
       if (isValid) {
-        channelSecret = account.channel_secret;
-        channelAccessToken = account.channel_access_token;
-        matchedAccountId = account.id;
+        matchedAccount = account;
         break;
       }
     }
   }
 
-  // Verify with resolved secret
-  const valid = await verifySignature(channelSecret, rawBody, signature);
-  if (!valid) {
+  if (!matchedAccount || !Array.isArray(body.events)) {
     console.error('Invalid LINE signature');
     return c.json({ status: 'ok' }, 200);
   }
 
+  const matchedAccountId = matchedAccount.id;
+  const channelAccessToken = matchedAccount.channel_access_token;
   const lineClient = new LineClient(channelAccessToken);
 
   // 非同期処理 — LINE は ~1s 以内のレスポンスを要求
@@ -92,6 +87,7 @@ async function handleEvent(
   workerUrl?: string,
   liffUrl?: string,
 ): Promise<void> {
+  if (!lineAccountId) return;
   if (event.type === 'follow') {
     const userId =
       event.source.type === 'user' ? event.source.userId : undefined;
@@ -107,22 +103,17 @@ async function handleEvent(
 
     const friend = await upsertFriend(db, {
       lineUserId: userId,
+      lineAccountId,
       displayName: profile?.displayName ?? null,
       pictureUrl: profile?.pictureUrl ?? null,
       statusMessage: profile?.statusMessage ?? null,
     });
 
-    // Set line_account_id for multi-account tracking (always update on follow)
-    if (lineAccountId) {
-      await db.prepare('UPDATE friends SET line_account_id = ?, updated_at = ? WHERE id = ?')
-        .bind(lineAccountId, jstNow(), friend.id).run();
-    }
-
+    let replyTokenUsed = false;
     // friend_add シナリオに登録（このアカウントのシナリオのみ）
     const scenarios = await getScenarios(db);
     for (const scenario of scenarios) {
-      // Only trigger scenarios belonging to this account (or unassigned for backward compat)
-      const scenarioAccountMatch = !scenario.line_account_id || !lineAccountId || scenario.line_account_id === lineAccountId;
+      const scenarioAccountMatch = scenario.line_account_id === lineAccountId;
       if (scenario.trigger_type === 'friend_add' && scenario.is_active && scenarioAccountMatch) {
         try {
           const existing = await db
@@ -135,13 +126,14 @@ async function handleEvent(
             // Immediate delivery: if the first step has delay=0, send it now via replyMessage (free)
             const steps = await getScenarioSteps(db, scenario.id);
             const firstStep = steps[0];
-            if (firstStep && firstStep.delay_minutes === 0 && friendScenario.status === 'active') {
+            if (firstStep && firstStep.delay_minutes === 0 && !replyTokenUsed && await isScenarioDeliveryAllowed(db, friendScenario.id)) {
               try {
                 const { resolveMetadata } = await import('../services/step-delivery.js');
                 const resolvedMeta = await resolveMetadata(db, { user_id: (friend as unknown as Record<string, string | null>).user_id, metadata: (friend as unknown as Record<string, string | null>).metadata });
                 const expandedContent = expandVariables(firstStep.message_content, { ...friend, metadata: resolvedMeta } as Parameters<typeof expandVariables>[1]);
                 const message = buildMessage(firstStep.message_type, expandedContent);
                 await lineClient.replyMessage(event.replyToken, [message]);
+                replyTokenUsed = true;
 
                 // Log outgoing message (replyMessage = 無料)
                 const logId = crypto.randomUUID();
@@ -189,15 +181,17 @@ async function handleEvent(
 
     // ref に基づくオートメーション実行（友だち追加時の流入経路別あいさつ + タグ付与）
     // Run follow automations: ref-specific match first, then default (empty conditions) as fallback
-    let replyTokenUsed = false;
     {
       const allAutomations = await getActiveAutomationsByEvent(db, 'follow');
       const accountAutomations = allAutomations.filter(
-        (a) => !a.line_account_id || !lineAccountId || a.line_account_id === lineAccountId,
+        (a) => a.line_account_id === lineAccountId,
       );
 
       for (const automation of accountAutomations) {
         const conditions = JSON.parse(automation.conditions) as Record<string, unknown>;
+        if (!conditions || typeof conditions !== 'object' || Array.isArray(conditions)
+          || Object.keys(conditions).some(key => key !== 'ref')
+          || (conditions.ref !== undefined && typeof conditions.ref !== 'string')) continue;
         const actions = JSON.parse(automation.actions) as Array<{ type: string; [key: string]: unknown }>;
 
         if (conditions.ref) {
@@ -232,8 +226,8 @@ async function handleEvent(
             const tagName = (action as { tagName?: string }).tagName;
             if (tagName) {
               const tag = await db
-                .prepare('SELECT id FROM tags WHERE name = ? LIMIT 1')
-                .bind(tagName)
+                .prepare('SELECT id FROM tags WHERE name = ? AND line_account_id = ? LIMIT 1')
+                .bind(tagName, lineAccountId)
                 .first<{ id: string }>();
               if (tag) {
                 await addTagToFriend(db, friend.id, tag.id);
@@ -281,7 +275,7 @@ async function handleEvent(
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
-    await updateFriendFollowStatus(db, userId, false);
+    await updateFriendFollowStatus(db, userId, false, lineAccountId);
     return;
   }
 
@@ -291,17 +285,15 @@ async function handleEvent(
     const userId = event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
-    const friend = await getFriendByLineUserId(db, userId);
+    const friend = await getFriendByLineUserId(db, userId, lineAccountId);
     if (!friend) return;
 
     const postbackData = (event as unknown as { postback: { data: string } }).postback.data;
 
     // Match postback data against auto_replies (exact match on keyword)
-    const autoReplyQuery = lineAccountId
-      ? `SELECT * FROM auto_replies WHERE is_active = 1 AND (line_account_id IS NULL OR line_account_id = ?) ORDER BY created_at ASC`
-      : `SELECT * FROM auto_replies WHERE is_active = 1 AND line_account_id IS NULL ORDER BY created_at ASC`;
+    const autoReplyQuery = `SELECT * FROM auto_replies WHERE is_active = 1 AND line_account_id = ? ORDER BY created_at ASC`;
     const autoReplyStmt = db.prepare(autoReplyQuery);
-    const autoReplies = await (lineAccountId ? autoReplyStmt.bind(lineAccountId) : autoReplyStmt)
+    const autoReplies = await autoReplyStmt.bind(lineAccountId)
       .all<{
         id: string;
         keyword: string;
@@ -337,7 +329,7 @@ async function handleEvent(
       event.source.type === 'user' ? event.source.userId : undefined;
     if (!userId) return;
 
-    let friend = await getFriendByLineUserId(db, userId);
+    let friend = await getFriendByLineUserId(db, userId, lineAccountId);
     if (!friend) {
       // Existing follower not yet in DB — auto-register on first message
       let profile;
@@ -348,14 +340,11 @@ async function handleEvent(
       }
       friend = await upsertFriend(db, {
         lineUserId: userId,
+        lineAccountId,
         displayName: profile?.displayName ?? null,
         pictureUrl: profile?.pictureUrl ?? null,
         statusMessage: profile?.statusMessage ?? null,
       });
-      if (lineAccountId) {
-        await db.prepare('UPDATE friends SET line_account_id = ? WHERE id = ? AND line_account_id IS NULL')
-          .bind(lineAccountId, friend.id).run();
-      }
       await fireEvent(db, 'friend_add', { friendId: friend.id, eventData: { displayName: friend.display_name, source: 'first_message' } }, lineAccessToken, lineAccountId);
     }
 
@@ -417,57 +406,7 @@ async function handleEvent(
       }
     }
 
-    // Cross-account trigger: send message from another account via UUID
-    if (incomingText === '体験を完了する' && lineAccountId) {
-      try {
-        const friendRecord = await db.prepare('SELECT user_id FROM friends WHERE id = ?').bind(friend.id).first<{ user_id: string | null }>();
-        if (friendRecord?.user_id) {
-          // Find the same user on other accounts
-          const otherFriends = await db.prepare(
-            'SELECT f.line_user_id, la.channel_access_token FROM friends f INNER JOIN line_accounts la ON la.id = f.line_account_id WHERE f.user_id = ? AND f.line_account_id != ? AND f.is_following = 1'
-          ).bind(friendRecord.user_id, lineAccountId).all<{ line_user_id: string; channel_access_token: string }>();
-
-          for (const other of otherFriends.results) {
-            const otherClient = new LineClient(other.channel_access_token);
-            const { buildMessage: bm } = await import('../services/step-delivery.js');
-            await otherClient.pushMessage(other.line_user_id, [bm('flex', JSON.stringify({
-              type: 'bubble', size: 'giga',
-              header: { type: 'box', layout: 'vertical', paddingAll: '20px', backgroundColor: '#fffbeb',
-                contents: [{ type: 'text', text: `${friend.display_name || ''}さんへ`, size: 'lg', weight: 'bold', color: '#1e293b' }],
-              },
-              body: { type: 'box', layout: 'vertical', paddingAll: '20px',
-                contents: [
-                  { type: 'text', text: '別アカウントからのアクションを検知しました。', size: 'sm', color: '#06C755', weight: 'bold', wrap: true },
-                  { type: 'text', text: 'アカウント連携が正常に動作しています。体験ありがとうございました。', size: 'sm', color: '#1e293b', wrap: true, margin: 'md' },
-                  { type: 'separator', margin: 'lg' },
-                  { type: 'text', text: 'ステップ配信・フォーム即返信・アカウント連携・リッチメニュー・自動返信 — 全て無料、全てOSS。', size: 'xs', color: '#64748b', wrap: true, margin: 'lg' },
-                ],
-              },
-              footer: { type: 'box', layout: 'vertical', paddingAll: '16px',
-                contents: [
-                  { type: 'button', action: { type: 'message', label: '導入について相談する', text: '導入支援を希望します' }, style: 'primary', color: '#06C755' },
-                  ...(liffUrl ? [{ type: 'button', action: { type: 'uri', label: 'フィードバックを送る', uri: `${liffUrl}?page=form` }, style: 'secondary', margin: 'sm' }] : []),
-                ],
-              },
-            }))]);
-          }
-
-          // Reply on Account ② confirming
-          await lineClient.replyMessage(event.replyToken, [buildMessage('flex', JSON.stringify({
-            type: 'bubble',
-            body: { type: 'box', layout: 'vertical', paddingAll: '20px',
-              contents: [
-                { type: 'text', text: 'Account ① にメッセージを送りました', size: 'sm', color: '#06C755', weight: 'bold', align: 'center' },
-                { type: 'text', text: 'Account ① のトーク画面を確認してください', size: 'xs', color: '#64748b', align: 'center', margin: 'md' },
-              ],
-            },
-          }))]);
-          return;
-        }
-      } catch (err) {
-        console.error('Cross-account trigger error:', err);
-      }
-    }
+    // Account linking never triggers messages from another official account.
 
     // 面談日時抽出: 面談予約済タグを持つ友だちのメッセージから日時パターンを検出
     // 検出した場合、リマインダ登録 + 確認返信を行う（replyToken消費）
@@ -482,14 +421,12 @@ async function handleEvent(
       return;
     }
 
-    // 自動返信チェック（このアカウントのルール + グローバルルールのみ）
+    // 自動返信チェック（署名を検証したアカウントのルールのみ）
     // NOTE: Auto-replies use replyMessage (free, no quota) instead of pushMessage
     // The replyToken is only valid for ~1 minute after the message event
-    const autoReplyQuery = lineAccountId
-      ? `SELECT * FROM auto_replies WHERE is_active = 1 AND (line_account_id IS NULL OR line_account_id = ?) ORDER BY created_at ASC`
-      : `SELECT * FROM auto_replies WHERE is_active = 1 AND line_account_id IS NULL ORDER BY created_at ASC`;
+    const autoReplyQuery = `SELECT * FROM auto_replies WHERE is_active = 1 AND line_account_id = ? ORDER BY created_at ASC`;
     const autoReplyStmt = db.prepare(autoReplyQuery);
-    const autoReplies = await (lineAccountId ? autoReplyStmt.bind(lineAccountId) : autoReplyStmt)
+    const autoReplies = await autoReplyStmt.bind(lineAccountId)
       .all<{
         id: string;
         keyword: string;

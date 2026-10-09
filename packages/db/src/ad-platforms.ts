@@ -11,6 +11,7 @@ export interface AdPlatform {
 }
 
 export interface AdPlatformConfig {
+  line_account_id?: string;
   // Meta
   pixel_id?: string;
   access_token?: string;

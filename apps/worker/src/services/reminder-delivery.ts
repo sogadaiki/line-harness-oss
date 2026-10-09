@@ -21,6 +21,7 @@ import { resolveDeliveryClient } from './line-client-resolver.js';
 export async function processReminderDeliveries(
   db: D1Database,
   lineClient: LineClient,
+  accountScope?: string,
 ): Promise<void> {
   const now = jstNow();
   const dueReminders = await getDueReminderDeliveries(db, now);
@@ -40,11 +41,27 @@ export async function processReminderDeliveries(
       }
 
       // フレンドの line_account_id から正しい LINE クライアントを解決する
+      if (accountScope && friend.line_account_id !== accountScope) continue;
       const deliveryClient = await resolveDeliveryClient(db, friend.line_account_id, lineClient);
 
       for (const step of fr.steps) {
+        const eligible=await db.prepare(`SELECT fr.id FROM friend_reminders fr JOIN reminders r ON r.id=fr.reminder_id JOIN friends f ON f.id=fr.friend_id JOIN line_accounts a ON a.id=f.line_account_id WHERE fr.id=? AND fr.status='active' AND r.is_active=1 AND a.is_active=1 AND f.is_following=1 AND r.line_account_id=f.line_account_id`).bind(fr.id).first();
+        if (!eligible) break;
         const message = buildMessage(step.message_type, step.message_content);
-        await deliveryClient.pushMessage(friend.line_user_id, [message]);
+        const claimId=crypto.randomUUID();
+        const claimed=await db.prepare(`INSERT INTO friend_reminder_deliveries(id,friend_reminder_id,reminder_step_id,status)
+          VALUES (?,?,?,'pending') ON CONFLICT(friend_reminder_id,reminder_step_id) DO NOTHING RETURNING id`)
+          .bind(claimId,fr.id,step.id).first();
+        if (!claimed) continue;
+        try {
+          const stillEligible=await db.prepare(`SELECT fr.id FROM friend_reminders fr JOIN reminders r ON r.id=fr.reminder_id JOIN friends f ON f.id=fr.friend_id JOIN line_accounts a ON a.id=f.line_account_id WHERE fr.id=? AND fr.status='active' AND r.is_active=1 AND a.is_active=1 AND f.is_following=1 AND r.line_account_id=f.line_account_id`).bind(fr.id).first();
+          if (!stillEligible) {await db.prepare('DELETE FROM friend_reminder_deliveries WHERE id=?').bind(claimId).run();break;}
+          await deliveryClient.pushMessage(friend.line_user_id, [message]);
+        } catch(error) {
+          // A timeout can mean LINE accepted the send. Keep the claim for manual review.
+          await db.prepare("UPDATE friend_reminder_deliveries SET status='failed' WHERE id=?").bind(claimId).run();
+          throw error;
+        }
 
         // メッセージログに記録
         const logId = crypto.randomUUID();

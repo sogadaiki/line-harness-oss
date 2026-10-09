@@ -55,11 +55,11 @@ async function issueNewToken(
   return res.json() as Promise<TokenResponse>;
 }
 
-export async function refreshLineAccessTokens(db: D1Database): Promise<void> {
+export async function refreshLineAccessTokens(db: D1Database, accountScope?: string): Promise<void> {
   const accounts = await getLineAccounts(db);
 
   for (const account of accounts) {
-    if (!account.is_active) continue;
+    if (!account.is_active || (accountScope && account.id !== accountScope)) continue;
     if (!shouldRefresh(account)) continue;
 
     try {

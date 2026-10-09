@@ -2,17 +2,15 @@ import { Hono } from 'hono';
 import { LineClient } from '@line-crm/line-sdk';
 import { getFriendById, getLineAccountById } from '@line-crm/db';
 import type { Env } from '../index.js';
+import type { Context } from 'hono';
+import { getScope } from '../utils/scope.js';
+import { resolveDeliveryClient } from '../services/line-client-resolver.js';
 
 const richMenus = new Hono<Env>();
 
 /** Resolve LINE access token — uses accountId query param if provided, otherwise default */
-async function resolveLineClient(c: { env: Env['Bindings']; req: { query(key: string): string | undefined } }): Promise<LineClient> {
-  const accountId = c.req.query('accountId');
-  if (accountId) {
-    const account = await getLineAccountById(c.env.DB, accountId);
-    if (account) return new LineClient(account.channel_access_token);
-  }
-  return new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+async function resolveLineClient(c: Context<Env>): Promise<LineClient> {
+  return resolveDeliveryClient(c.env.DB,getScope(c) ?? null);
 }
 
 // GET /api/rich-menus — list all rich menus from LINE API
@@ -86,13 +84,7 @@ richMenus.post('/api/friends/:friendId/rich-menu', async (c) => {
       return c.json({ success: false, error: 'Friend not found' }, 404);
     }
 
-    let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
-    const friendAccountId = (friend as unknown as Record<string, string | null>).line_account_id;
-    if (friendAccountId) {
-      const account = await getLineAccountById(db, friendAccountId);
-      if (account) accessToken = account.channel_access_token;
-    }
-    const lineClient = new LineClient(accessToken);
+    const lineClient = await resolveLineClient(c);
     await lineClient.linkRichMenuToUser(friend.line_user_id, body.richMenuId);
 
     return c.json({ success: true, data: null });
@@ -114,13 +106,7 @@ richMenus.delete('/api/friends/:friendId/rich-menu', async (c) => {
       return c.json({ success: false, error: 'Friend not found' }, 404);
     }
 
-    let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
-    const friendAccId = (friend as unknown as Record<string, string | null>).line_account_id;
-    if (friendAccId) {
-      const account = await getLineAccountById(c.env.DB, friendAccId);
-      if (account) accessToken = account.channel_access_token;
-    }
-    const lineClient = new LineClient(accessToken);
+    const lineClient = await resolveLineClient(c);
     await lineClient.unlinkRichMenuFromUser(friend.line_user_id);
 
     return c.json({ success: true, data: null });

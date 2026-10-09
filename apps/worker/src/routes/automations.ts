@@ -8,6 +8,7 @@ import {
   getAutomationLogs,
 } from '@line-crm/db';
 import { getScope } from '../utils/scope.js';
+import { validConditions } from '../utils/automation-conditions.js';
 import type { Env } from '../index.js';
 
 const automations = new Hono<Env>();
@@ -101,12 +102,8 @@ automations.post('/api/automations', async (c) => {
     if (!body.name || !body.eventType || !body.actions) {
       return c.json({ success: false, error: 'name, eventType, actions are required' }, 400);
     }
-    const item = await createAutomation(c.env.DB, body);
-    // Save line_account_id if provided
-    if (body.lineAccountId) {
-      await c.env.DB.prepare(`UPDATE automations SET line_account_id = ? WHERE id = ?`)
-        .bind(body.lineAccountId, item.id).run();
-    }
+    if (!validConditions(body.conditions ?? {},body.eventType)) return c.json({success:false,error:'Invalid conditions: follow supports ref; other events support tag_id, keyword or numeric score_threshold'},400);
+    const item = await createAutomation(c.env.DB, {...body,lineAccountId:getScope(c)});
     return c.json({
       success: true,
       data: {
@@ -129,12 +126,15 @@ automations.put('/api/automations/:id', async (c) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json<Record<string, unknown>>();
-    await updateAutomation(c.env.DB, id, body);
-    // Update line_account_id if provided (not in updateAutomation's supported fields)
-    if ('lineAccountId' in body) {
-      await c.env.DB.prepare(`UPDATE automations SET line_account_id = ? WHERE id = ?`)
-        .bind(body.lineAccountId ?? null, id).run();
+    const existing = await getAutomationById(c.env.DB,id);
+    const eventType=typeof body.eventType==='string'?body.eventType:existing?.event_type;
+    if (body.conditions !== undefined && !validConditions(body.conditions,eventType)) return c.json({success:false,error:'Invalid automation conditions'},400);
+    if (body.isActive === true) {
+      let conditions:unknown=body.conditions;
+      if (conditions===undefined) {try {conditions=JSON.parse(existing?.conditions ?? 'null');} catch {conditions=null;}}
+      if (!validConditions(conditions,eventType)) return c.json({success:false,error:'Correct the condition schema before enabling this rule'},400);
     }
+    await updateAutomation(c.env.DB, id, body);
     const updated = await getAutomationById(c.env.DB, id);
     if (!updated) return c.json({ success: false, error: 'Not found' }, 404);
     return c.json({

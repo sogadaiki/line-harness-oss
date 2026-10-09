@@ -12,11 +12,12 @@ import {
 
 export async function checkAccountHealth(
   db: D1Database,
+  accountScope?: string,
 ): Promise<void> {
   const accounts = await getLineAccounts(db);
 
   for (const account of accounts) {
-    if (!account.is_active) continue;
+    if (!account.is_active || (accountScope && account.id !== accountScope)) continue;
 
     try {
       await checkSingleAccount(db, account);
@@ -40,10 +41,10 @@ async function checkSingleAccount(
 
   const sentMessages = await db
     .prepare(
-      `SELECT COUNT(*) as count FROM messages_log
-       WHERE direction = 'outgoing' AND created_at >= ?`,
+      `SELECT COUNT(*) as count FROM messages_log m JOIN friends f ON f.id=m.friend_id
+       WHERE m.direction = 'outgoing' AND m.created_at >= ? AND f.line_account_id = ?`,
     )
-    .bind(oneHourAgo)
+    .bind(oneHourAgo, account.id)
     .first<{ count: number }>();
 
   const totalSent = sentMessages?.count ?? 0;

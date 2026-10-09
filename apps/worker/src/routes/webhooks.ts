@@ -149,6 +149,8 @@ webhooks.post('/api/webhooks/incoming/:id/receive', async (c) => {
     const id = c.req.param('id');
     const wh = await getIncomingWebhookById(c.env.DB, id);
     if (!wh || !wh.is_active) return c.json({ success: false, error: 'Webhook not found or inactive' }, 404);
+    if (!wh.line_account_id || (c.env.SCOPED_LINE_ACCOUNT_ID && wh.line_account_id !== c.env.SCOPED_LINE_ACCOUNT_ID)) return c.json({success:false,error:'Webhook account not found'},404);
+    if (!wh.secret || c.req.header('X-Webhook-Secret') !== wh.secret) return c.json({success:false,error:'Invalid webhook secret'},401);
 
     const body = await c.req.json();
 
@@ -157,7 +159,7 @@ webhooks.post('/api/webhooks/incoming/:id/receive', async (c) => {
     const eventType = `incoming_webhook.${wh.source_type}`;
     await fireEvent(c.env.DB, eventType, {
       eventData: { webhookId: wh.id, source: wh.source_type, payload: body },
-    });
+    }, undefined, wh.line_account_id);
 
     return c.json({ success: true, data: { received: true, source: wh.source_type } });
   } catch (err) {

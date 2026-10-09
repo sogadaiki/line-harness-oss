@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import {
   getFriendByLineUserId,
   createUser,
@@ -16,6 +17,9 @@ import {
   jstNow,
 } from '@line-crm/db';
 import type { Env } from '../index.js';
+import { getScope } from '../utils/scope.js';
+import { verifyAccountIdentity } from '../services/line-identity.js';
+import { resolveDeliveryClient } from '../services/line-client-resolver.js';
 
 const liffRoutes = new Hono<Env>();
 
@@ -44,6 +48,11 @@ liffRoutes.get('/auth/line', async (c) => {
   const utmMedium = c.req.query('utm_medium') || '';
   const utmCampaign = c.req.query('utm_campaign') || '';
   let accountParam = c.req.query('account') || '';
+  if (c.env.SCOPED_LINE_ACCOUNT_ID) {
+    const scoped = await getLineAccountById(c.env.DB, c.env.SCOPED_LINE_ACCOUNT_ID);
+    if (!scoped?.is_active || (accountParam && accountParam !== scoped.channel_id)) return c.text('Account unavailable',403);
+    accountParam = scoped.channel_id;
+  }
   const uidParam = c.req.query('uid') || ''; // existing user UUID for cross-account linking
   let poolAccount = ''; // pool's channel_id — passed via state only, not accountParam
   const baseUrl = new URL(c.req.url).origin;
@@ -54,12 +63,9 @@ liffRoutes.get('/auth/line', async (c) => {
   let liffUrl = c.env.LIFF_URL;
   if (accountParam) {
     const account = await getLineAccountByChannelId(c.env.DB, accountParam);
-    if (account?.login_channel_id) {
-      channelId = account.login_channel_id;
-    }
-    if (account?.liff_id) {
-      liffUrl = `https://liff.line.me/${account.liff_id}`;
-    }
+    if (!account?.is_active || !account.login_channel_id || !account.login_channel_secret) return c.text('LINE Login is unavailable for this account',403);
+    channelId = account.login_channel_id;
+    liffUrl = account.liff_id ? `https://liff.line.me/${account.liff_id}` : '';
   } else {
     // Traffic pool: pick random account from pool for distribution
     // NOTE: accountParam is NOT set here — setting it triggers the cross-account
@@ -337,12 +343,13 @@ liffRoutes.get('/auth/callback', async (c) => {
     // Multi-account: resolve LINE Login credentials from DB
     let loginChannelId = c.env.LINE_LOGIN_CHANNEL_ID;
     let loginChannelSecret = c.env.LINE_LOGIN_CHANNEL_SECRET;
-    if (accountParam) {
-      const account = await getLineAccountByChannelId(c.env.DB, accountParam);
-      if (account?.login_channel_id && account?.login_channel_secret) {
-        loginChannelId = account.login_channel_id;
-        loginChannelSecret = account.login_channel_secret;
-      }
+    const account = accountParam
+      ? await getLineAccountByChannelId(c.env.DB, accountParam)
+      : (await getLineAccounts(c.env.DB)).find(a => a.login_channel_id === loginChannelId);
+    if (!account?.is_active || !account.login_channel_id || !account.login_channel_secret || (c.env.SCOPED_LINE_ACCOUNT_ID && account.id !== c.env.SCOPED_LINE_ACCOUNT_ID)) return c.html(errorPage('Account unavailable'),403);
+    if (account.login_channel_id && account.login_channel_secret) {
+      loginChannelId = account.login_channel_id;
+      loginChannelSecret = account.login_channel_secret;
     }
 
     // Exchange code for tokens
@@ -414,6 +421,7 @@ liffRoutes.get('/auth/callback', async (c) => {
     // Upsert friend (may not exist yet if webhook hasn't fired)
     const friend = await upsertFriend(db, {
       lineUserId,
+      lineAccountId: account.id,
       displayName,
       pictureUrl,
       statusMessage: null,
@@ -552,7 +560,7 @@ liffRoutes.get('/auth/callback', async (c) => {
 
       const scenarios = await getScenarios(db);
       for (const scenario of scenarios) {
-        const scenarioAccountMatch = !scenario.line_account_id || !matchedAccountId || scenario.line_account_id === matchedAccountId;
+        const scenarioAccountMatch = scenario.line_account_id === account.id;
         if (scenario.trigger_type === 'friend_add' && scenario.is_active && scenarioAccountMatch) {
           const existing = await db
             .prepare('SELECT id FROM friend_scenarios WHERE friend_id = ? AND scenario_id = ?')
@@ -575,26 +583,19 @@ liffRoutes.get('/auth/callback', async (c) => {
     // Send form link as LINE message if form param was passed
     if (formId && friend?.line_user_id) {
       try {
+        const ownForm = await db.prepare('SELECT id FROM forms WHERE id=? AND line_account_id=? AND is_active=1').bind(formId,account.id).first();
+        if (!ownForm) return c.html(errorPage('Form unavailable for this account'),404);
         // Build form LIFF URL using the friend's account liff_id (multi-account aware)
         let formLiffUrl = `${new URL(c.req.url).origin}?page=form&id=${formId}`;
         const { LineClient } = await import('@line-crm/line-sdk');
         const { getLineAccountById: getAcctById } = await import('@line-crm/db');
-        let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
+        const lineClient = await resolveDeliveryClient(db,friend.line_account_id);
         if (friend.line_account_id) {
           const account = await getAcctById(db, friend.line_account_id);
-          if (account?.channel_access_token) accessToken = account.channel_access_token;
           if (account?.liff_id) {
             formLiffUrl = `https://liff.line.me/${account.liff_id}?page=form&id=${formId}`;
           }
         }
-        if (formLiffUrl.startsWith(`${new URL(c.req.url).origin}`)) {
-          const envLiffUrl = c.env.LIFF_URL || '';
-          const envLiffIdMatch = envLiffUrl.match(/liff\.line\.me\/([0-9]+-[A-Za-z0-9]+)/);
-          if (envLiffIdMatch) {
-            formLiffUrl = `https://liff.line.me/${envLiffIdMatch[1]}?page=form&id=${formId}`;
-          }
-        }
-        const lineClient = new LineClient(accessToken);
         await lineClient.pushMessage(friend.line_user_id, [{
           type: 'flex',
           altText: '🎁 特典を受け取る',
@@ -697,10 +698,10 @@ liffRoutes.get('/api/liff/config', async (c) => {
       .bind(liffId)
       .first<{ id: string; name: string; channel_access_token: string }>();
 
-    // Fallback to default env account if liff_id not found in DB
-    const accessToken = account?.channel_access_token || c.env.LINE_CHANNEL_ACCESS_TOKEN;
-    const accountName = account?.name || 'Default';
-    const accountId = account?.id || 'default';
+    if (!account || (c.env.SCOPED_LINE_ACCOUNT_ID && account.id !== c.env.SCOPED_LINE_ACCOUNT_ID)) return c.json({success:false,error:'LIFF account not found'},404);
+    const accessToken = account.channel_access_token;
+    const accountName = account.name;
+    const accountId = account.id;
 
     // Fetch bot basic ID from LINE API
     let botBasicId = '';
@@ -731,15 +732,17 @@ liffRoutes.get('/api/liff/config', async (c) => {
 // POST /api/liff/profile - get friend by LINE userId (public, no auth)
 liffRoutes.post('/api/liff/profile', async (c) => {
   try {
-    const body = await c.req.json<{ lineUserId: string }>();
+    const body = await c.req.json<{ lineUserId: string; idToken?:string }>();
     if (!body.lineUserId) {
       return c.json({ success: false, error: 'lineUserId is required' }, 400);
     }
 
-    const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId);
+    const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId, c.env.SCOPED_LINE_ACCOUNT_ID);
     if (!friend) {
       return c.json({ success: false, error: 'Friend not found' }, 404);
     }
+    if (!friend.line_account_id) return c.json({success:false,error:'Friend account is required'},409);
+    await verifyAccountIdentity(c.env.DB,friend.line_account_id,body.idToken,friend.line_user_id);
 
     return c.json({
       success: true,
@@ -752,6 +755,7 @@ liffRoutes.post('/api/liff/profile', async (c) => {
     });
   } catch (err) {
     console.error('POST /api/liff/profile error:', err);
+    if (err instanceof HTTPException) throw err;
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });
@@ -771,10 +775,10 @@ liffRoutes.post('/api/liff/link', async (c) => {
     }
 
     // Try verifying with default Login channel, then DB accounts
-    const loginChannelIds = [c.env.LINE_LOGIN_CHANNEL_ID];
+    const loginChannelIds:string[] = [];
     const dbAccounts = await getLineAccounts(c.env.DB);
     for (const acct of dbAccounts) {
-      if (acct.login_channel_id && !loginChannelIds.includes(acct.login_channel_id)) {
+      if (acct.is_active && (!c.env.SCOPED_LINE_ACCOUNT_ID || acct.id===c.env.SCOPED_LINE_ACCOUNT_ID) && acct.login_channel_id && !loginChannelIds.includes(acct.login_channel_id)) {
         loginChannelIds.push(acct.login_channel_id);
       }
     }
@@ -798,7 +802,7 @@ liffRoutes.post('/api/liff/link', async (c) => {
     const email = verified.email || null;
 
     const db = c.env.DB;
-    const friend = await getFriendByLineUserId(db, lineUserId);
+    const friend = await getFriendByLineUserId(db, lineUserId, c.env.SCOPED_LINE_ACCOUNT_ID);
     if (!friend) {
       return c.json({ success: false, error: 'Friend not found' }, 404);
     }
@@ -918,7 +922,7 @@ liffRoutes.post('/api/liff/link', async (c) => {
 liffRoutes.get('/api/analytics/ref-summary', async (c) => {
   try {
     const db = c.env.DB;
-    const lineAccountId = c.req.query('lineAccountId');
+    const lineAccountId = getScope(c);
     const accountFilter = lineAccountId ? 'AND f.line_account_id = ?' : '';
     const accountBinds = lineAccountId ? [lineAccountId] : [];
 
@@ -931,12 +935,12 @@ liffRoutes.get('/api/analytics/ref-summary', async (c) => {
           COUNT(rt.id) as click_count,
           MAX(rt.created_at) as latest_at
         FROM entry_routes er
-        LEFT JOIN ref_tracking rt ON er.ref_code = rt.ref_code
+        LEFT JOIN ref_tracking rt ON er.ref_code = rt.ref_code ${lineAccountId ? 'AND rt.friend_id IN (SELECT id FROM friends WHERE line_account_id=?)' : ''}
         LEFT JOIN friends f ON f.id = rt.friend_id ${accountFilter ? `${accountFilter}` : ''}
         GROUP BY er.ref_code, er.name
         ORDER BY friend_count DESC`,
       )
-      .bind(...accountBinds)
+      .bind(...accountBinds,...accountBinds)
       .all<{
         ref_code: string;
         name: string;
@@ -996,7 +1000,7 @@ liffRoutes.get('/api/analytics/ref/:refCode', async (c) => {
       return c.json({ success: false, error: 'Entry route not found' }, 404);
     }
 
-    const lineAccountId = c.req.query('lineAccountId');
+    const lineAccountId = getScope(c);
     const accountFilter = lineAccountId ? 'AND f.line_account_id = ?' : '';
     const binds = lineAccountId ? [refCode, refCode, lineAccountId] : [refCode, refCode];
 
@@ -1297,60 +1301,23 @@ liffRoutes.post('/api/liff/send-form-link', async (c) => {
       return c.json({ success: false, error: 'lineUserId and formId required' }, 400);
     }
 
-    // Verify idToken if provided — ensures caller is the actual user
-    if (idToken) {
-      const loginChannelIds = [c.env.LINE_LOGIN_CHANNEL_ID];
-      const dbAccounts = await getLineAccounts(c.env.DB);
-      for (const acct of dbAccounts) {
-        if (acct.login_channel_id) loginChannelIds.push(acct.login_channel_id);
-      }
-      let verified = false;
-      for (const channelId of loginChannelIds) {
-        const verifyRes = await fetch('https://api.line.me/oauth2/v2.1/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({ id_token: idToken, client_id: channelId }),
-        });
-        if (verifyRes.ok) {
-          const data = await verifyRes.json() as { sub: string };
-          if (data.sub !== lineUserId) {
-            return c.json({ success: false, error: 'Token mismatch' }, 403);
-          }
-          verified = true;
-          break;
-        }
-      }
-      if (!verified) {
-        return c.json({ success: false, error: 'Invalid idToken' }, 401);
-      }
-    }
-
+    if (!idToken) return c.json({success:false,error:'LINE ID token is required'},401);
     const db = c.env.DB;
-    const friend = await getFriendByLineUserId(db, lineUserId);
-    if (!friend) {
-      return c.json({ success: false, error: 'Friend not found' }, 404);
-    }
+    const friend = await getFriendByLineUserId(db,lineUserId,c.env.SCOPED_LINE_ACCOUNT_ID);
+    if (!friend?.line_account_id) return c.json({success:false,error:'Friend account not found'},404);
+    const form = await db.prepare('SELECT id FROM forms WHERE id=? AND line_account_id=? AND is_active=1').bind(formId,friend.line_account_id).first();
+    if (!form) return c.json({success:false,error:'Form not found in friend account'},404);
+    await verifyAccountIdentity(db,friend.line_account_id,idToken,lineUserId);
 
     // Build form LIFF URL using the friend's account liff_id (multi-account aware)
     let formLiffUrl = `${new URL(c.req.url).origin}?page=form&id=${formId}`;
-    const { LineClient } = await import('@line-crm/line-sdk');
-    let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
     if ((friend as any).line_account_id) {
       const account = await getLineAccountById(db, (friend as any).line_account_id);
-      if (account?.channel_access_token) accessToken = account.channel_access_token;
       if (account?.liff_id) {
         formLiffUrl = `https://liff.line.me/${account.liff_id}?page=form&id=${formId}`;
       }
     }
-    if (formLiffUrl.startsWith(`${new URL(c.req.url).origin}`)) {
-      // Fallback: use env LIFF_URL if no account-specific liff_id
-      const liffUrl = c.env.LIFF_URL || '';
-      const liffIdMatch = liffUrl.match(/liff\.line\.me\/([0-9]+-[A-Za-z0-9]+)/);
-      if (liffIdMatch) {
-        formLiffUrl = `https://liff.line.me/${liffIdMatch[1]}?page=form&id=${formId}`;
-      }
-    }
-    const lineClient = new LineClient(accessToken);
+    const lineClient = await resolveDeliveryClient(db, friend.line_account_id);
     await lineClient.pushMessage(lineUserId, [{
       type: 'flex',
       altText: '🎁 特典を受け取る',
@@ -1381,6 +1348,7 @@ liffRoutes.post('/api/liff/send-form-link', async (c) => {
     return c.json({ success: true });
   } catch (err) {
     console.error('POST /api/liff/send-form-link error:', err);
+    if (err instanceof HTTPException) throw err;
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

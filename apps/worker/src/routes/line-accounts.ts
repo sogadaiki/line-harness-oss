@@ -56,7 +56,13 @@ lineAccounts.get('/api/line-accounts', async (c) => {
     const db = c.env.DB;
     const allItems = await getLineAccounts(db);
     const scoped = getScope(c);
-    const items = scoped ? allItems.filter((a) => a.id === scoped) : allItems;
+    let items = scoped ? allItems.filter((a) => a.id === scoped) : allItems;
+    if (c.get('staff').role !== 'owner') {
+      try {
+        const grants=await db.prepare('SELECT line_account_id FROM staff_line_accounts WHERE staff_id=?').bind(c.get('staff').id).all<{line_account_id:string}>();
+        items=items.filter(a=>grants.results.some(g=>g.line_account_id===a.id));
+      } catch { items=[]; }
+    }
 
     // Get stats for all accounts in parallel
     const results = await Promise.all(
@@ -67,12 +73,13 @@ lineAccounts.get('/api/line-accounts', async (c) => {
           db.prepare(
             `SELECT COUNT(*) as count FROM friend_scenarios fs
              INNER JOIN friends f ON f.id = fs.friend_id
-             WHERE fs.status = 'active' AND f.line_account_id = ?`,
+             JOIN scenarios s ON s.id=fs.scenario_id
+             WHERE fs.status = 'active' AND s.is_active=1 AND s.line_account_id=f.line_account_id AND f.line_account_id = ?`,
           ).bind(item.id).first<{ count: number }>(),
           db.prepare(
             `SELECT COUNT(*) as count FROM messages_log ml
              INNER JOIN friends f ON f.id = ml.friend_id
-             WHERE ml.direction = 'outgoing' AND (ml.delivery_type IS NULL OR ml.delivery_type = 'push') AND ml.created_at >= date('now', '-30 days') AND f.line_account_id = ?`,
+             WHERE ml.direction = 'outgoing' AND (ml.delivery_type IS NULL OR ml.delivery_type = 'push') AND ml.created_at >= strftime('%Y-%m-01','now','+9 hours') AND f.line_account_id = ?`,
           ).bind(item.id).first<{ count: number }>(),
         ]);
 
@@ -85,6 +92,8 @@ lineAccounts.get('/api/line-accounts', async (c) => {
             friendCount: friendCount?.count ?? 0,
             activeScenarios: scenarioCount?.count ?? 0,
             messagesThisMonth: msgCount?.count ?? 0,
+            messagePeriod: 'current-calendar-month-jst',
+            messageCounting: 'push-or-legacy-unknown',
           },
         };
       }),

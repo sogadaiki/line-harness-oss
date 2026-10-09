@@ -28,6 +28,9 @@ import {
 import { LineClient } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import { sendAdConversions } from './ad-conversion.js';
+import { matchConditions } from '../utils/automation-conditions.js';
+import { assertAccountResource } from '../middleware/account-scope.js';
+import { getFriendById, getLineAccountById } from '@line-crm/db';
 
 export interface EventPayload {
   friendId?: string;
@@ -53,9 +56,19 @@ export async function fireEvent(
   lineAccessToken?: string,
   lineAccountId?: string | null,
 ): Promise<void> {
+  // Resolve from the authoritative friend before any handler or external webhook.
+  if (payload.friendId) {
+    const friend = await getFriendById(db,payload.friendId);
+    if (!friend?.line_account_id || (lineAccountId && lineAccountId !== friend.line_account_id)) return;
+    lineAccountId = friend.line_account_id;
+  }
+  if (!lineAccountId) return;
+  const account = await getLineAccountById(db,lineAccountId);
+  if (!account?.is_active) return;
+  lineAccessToken = account.channel_access_token;
   // Phase 1: fire webhooks, apply scoring rules, and ad conversion postback concurrently.
   const phase1: Promise<unknown>[] = [
-    fireOutgoingWebhooks(db, eventType, payload),
+    fireOutgoingWebhooks(db, eventType, payload, lineAccountId),
     processScoring(db, eventType, payload),
   ];
   if (payload.friendId && payload.conversionEventName) {
@@ -130,10 +143,12 @@ async function fireOutgoingWebhooks(
   db: D1Database,
   eventType: string,
   payload: EventPayload,
+  lineAccountId: string,
 ): Promise<void> {
   try {
     const webhooks = await getActiveOutgoingWebhooksByEvent(db, eventType);
     for (const wh of webhooks) {
+      if (wh.line_account_id !== lineAccountId) continue;
       try {
         // Discord Webhook URLの場合はEmbed形式に変換
         const bodyObj = isDiscordWebhook(wh.url)
@@ -194,14 +209,22 @@ async function processAutomations(
 ): Promise<void> {
   try {
     const allAutomations = await getActiveAutomationsByEvent(db, eventType);
-    // Filter by account: match this account's automations + unassigned (backward compat)
+    // Unassigned rules are never eligible for account events.
     const automations = allAutomations.filter(
-      (a) => !a.line_account_id || !lineAccountId || a.line_account_id === lineAccountId,
+      (a) => Boolean(lineAccountId) && a.line_account_id === lineAccountId,
     );
 
     for (const automation of automations) {
-      const conditions = JSON.parse(automation.conditions) as Record<string, unknown>;
-      const actions = JSON.parse(automation.actions) as Array<{ type: string; params: Record<string, string> }>;
+      let conditions: unknown;
+      let actions: Array<{ type: string; params: Record<string, string> }>;
+      try {
+        conditions = JSON.parse(automation.conditions);
+        actions = JSON.parse(automation.actions);
+        if (!Array.isArray(actions) || actions.length === 0) continue;
+      } catch {
+        console.error(`Invalid automation definition: ${automation.id}`);
+        continue;
+      }
 
       // 条件チェック（簡易版: 条件が空なら常にマッチ）
       if (!matchConditions(conditions, payload)) continue;
@@ -210,7 +233,10 @@ async function processAutomations(
 
       for (const action of actions) {
         try {
-          await executeAction(db, action, payload, lineAccessToken);
+          // A rule already fetched must not continue after emergency stop.
+          const active = await db.prepare(`SELECT au.id FROM automations au JOIN line_accounts a ON a.id=au.line_account_id WHERE au.id=? AND au.is_active=1 AND a.is_active=1 AND au.line_account_id=?`).bind(automation.id,lineAccountId).first();
+          if (!active) break;
+          await executeAction(db, action, payload, lineAccessToken, lineAccountId!);
           results.push({ action: action.type, success: true });
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
@@ -218,7 +244,7 @@ async function processAutomations(
         }
       }
 
-      const allSuccess = results.every((r) => r.success);
+      const allSuccess = results.length === actions.length && results.every((r) => r.success);
       const anySuccess = results.some((r) => r.success);
 
       await createAutomationLog(db, {
@@ -234,44 +260,19 @@ async function processAutomations(
   }
 }
 
-/** 条件マッチング */
-function matchConditions(
-  conditions: Record<string, unknown>,
-  payload: EventPayload,
-): boolean {
-  // 条件が空 → 常にマッチ
-  if (Object.keys(conditions).length === 0) return true;
-
-  // score_threshold チェック
-  if (conditions.score_threshold !== undefined && payload.eventData) {
-    const currentScore = payload.eventData.currentScore as number | undefined;
-    if (currentScore !== undefined && currentScore < (conditions.score_threshold as number)) {
-      return false;
-    }
-  }
-
-  // tag_id チェック
-  if (conditions.tag_id !== undefined && payload.eventData) {
-    if (payload.eventData.tagId !== conditions.tag_id) return false;
-  }
-
-  // keyword チェック（message_received イベント用）
-  if (conditions.keyword !== undefined && payload.eventData) {
-    const text = payload.eventData.text as string | undefined;
-    if (!text || !text.includes(conditions.keyword as string)) return false;
-  }
-
-  return true;
-}
-
 /** アクション実行 */
 async function executeAction(
   db: D1Database,
   action: { type: string; params: Record<string, string> },
   payload: EventPayload,
   lineAccessToken?: string,
+  lineAccountId?: string,
 ): Promise<void> {
   const friendId = payload.friendId;
+  if (!lineAccountId) throw new Error('Action account is required');
+  if (friendId) await assertAccountResource(db,'friends',friendId,lineAccountId);
+  if (action.params.tagId) await assertAccountResource(db,'tags',action.params.tagId,lineAccountId);
+  if (action.params.scenarioId) await assertAccountResource(db,'scenarios',action.params.scenarioId,lineAccountId);
   if (!friendId && action.type !== 'send_webhook') {
     throw new Error('friendId is required for this action');
   }
@@ -401,7 +402,7 @@ async function executeAction(
     }
 
     default:
-      console.warn(`未知のアクションタイプ: ${action.type}`);
+      throw new Error(`Unsupported action type: ${action.type}`);
   }
 }
 
@@ -415,7 +416,7 @@ async function processNotifications(
   try {
     const allRules = await getActiveNotificationRulesByEvent(db, eventType);
     const rules = allRules.filter(
-      (r) => !r.line_account_id || !lineAccountId || r.line_account_id === lineAccountId,
+      (r) => Boolean(lineAccountId) && r.line_account_id === lineAccountId,
     );
 
     for (const rule of rules) {
@@ -431,6 +432,7 @@ async function processNotifications(
           body: JSON.stringify(payload),
           channel,
           metadata: JSON.stringify(payload.eventData ?? {}),
+          lineAccountId: lineAccountId!,
         });
 
         // Webhook通知チャネルの場合は即時配信

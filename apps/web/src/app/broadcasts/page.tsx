@@ -108,13 +108,17 @@ export default function BroadcastsPage() {
   }, [broadcasts])
 
   const handleSend = async (id: string) => {
-    if (!confirm('この配信を今すぐ送信してもよいですか？')) return
     setSendingId(id)
     try {
+      const preview=await api.broadcasts.preview(id)
+      if (!preview.success || preview.data.accountId !== selectedAccountId) throw new Error('配信対象を確認できません')
+      const p=preview.data
+      const countText=p.countKind==='local-estimate' ? `全フォロワー（台帳内は${p.recipientCount}人。LINE側の実人数は異なる場合があります）` : `${p.recipientCount}人（送信時の登録状態で変動します）`
+      if (!confirm(`送信LINE：${p.accountName}\n配信：${p.title}\n対象：${countText}\n\n今すぐ送信しますか？`)) return
       await api.broadcasts.send(id)
       load()
-    } catch {
-      setError('送信に失敗しました')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '送信に失敗しました')
     } finally {
       setSendingId(null)
     }

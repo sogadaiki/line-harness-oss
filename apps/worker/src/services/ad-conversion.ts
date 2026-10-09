@@ -11,6 +11,8 @@ import {
   logAdConversion,
   type AdPlatformConfig,
   type RefTracking,
+  getFriendById,
+  getLineAccountById,
 } from '@line-crm/db';
 
 export async function sendAdConversions(
@@ -19,6 +21,8 @@ export async function sendAdConversions(
   eventName: string,
   eventValue?: number,
 ): Promise<void> {
+  const friend=await getFriendById(db,friendId);
+  if (!friend?.line_account_id || !(await getLineAccountById(db,friend.line_account_id))?.is_active) return;
   const ref = await getRefTrackingWithClickIds(db, friendId);
   if (!ref) return;
 
@@ -26,6 +30,8 @@ export async function sendAdConversions(
 
   for (const platform of platforms) {
     const config: AdPlatformConfig = JSON.parse(platform.config);
+    // Legacy shared advertiser settings are not permission to export another OA's events.
+    if (config.line_account_id !== friend.line_account_id) continue;
 
     try {
       switch (platform.name) {

@@ -4,20 +4,15 @@ import { getLineAccountById } from '@line-crm/db';
 /**
  * Resolve the correct LineClient for a given friend's line_account_id.
  *
- * Returns the account-specific client when line_account_id is set and the
- * account record exists; otherwise falls back to the default client.
- *
- * NOTE: step-delivery.ts intentionally keeps its own inline resolution to
- * avoid regression risk (complex dedup flow). This utility is used by
- * reminder-delivery.ts and broadcast.ts only.
+ * Reject missing, deleted and inactive accounts. Never send through a default bot.
  */
 export async function resolveDeliveryClient(
   db: D1Database,
   friendLineAccountId: string | null,
-  defaultClient: LineClient,
+  _defaultClient?: LineClient,
 ): Promise<LineClient> {
-  if (!friendLineAccountId) return defaultClient;
+  if (!friendLineAccountId) throw new Error('Delivery account is required');
   const account = await getLineAccountById(db, friendLineAccountId);
-  if (!account) return defaultClient;
+  if (!account || !account.is_active) throw new Error('Delivery account is missing or inactive');
   return new LineClient(account.channel_access_token);
 }

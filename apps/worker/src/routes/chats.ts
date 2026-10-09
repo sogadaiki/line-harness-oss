@@ -11,8 +11,10 @@ import {
   createChat,
   updateChat,
   jstNow,
+  getLineAccountById,
 } from '@line-crm/db';
 import { getScope } from '../utils/scope.js';
+import { resolveDeliveryClient } from '../services/line-client-resolver.js';
 import type { Env } from '../index.js';
 
 const chats = new Hono<Env>();
@@ -213,11 +215,6 @@ chats.post('/api/chats', async (c) => {
     const body = await c.req.json<{ friendId: string; operatorId?: string; lineAccountId?: string | null }>();
     if (!body.friendId) return c.json({ success: false, error: 'friendId is required' }, 400);
     const item = await createChat(c.env.DB, body);
-    // Save line_account_id if provided
-    if (body.lineAccountId) {
-      await c.env.DB.prepare(`UPDATE chats SET line_account_id = ? WHERE id = ?`)
-        .bind(body.lineAccountId, item.id).run();
-    }
     return c.json({ success: true, data: { id: item.id, friendId: item.friend_id, status: item.status } }, 201);
   } catch (err) {
     console.error('POST /api/chats error:', err);
@@ -265,8 +262,10 @@ chats.post('/api/chats/:id/loading', async (c) => {
       .first<{ id: string; line_user_id: string }>();
     if (!friend) return c.json({ success: false, error: 'Friend not found' }, 404);
 
+    const account = await getLineAccountById(c.env.DB, getScope(c)!);
+    if (!account?.is_active) return c.json({ success: false, error: 'Account is inactive' }, 409);
     await startLoadingAnimation(
-      c.env.LINE_CHANNEL_ACCESS_TOKEN,
+      account.channel_access_token,
       friend.line_user_id,
       loadingSeconds,
     );
@@ -297,7 +296,7 @@ chats.post('/api/chats/:id/send', async (c) => {
 
     // LINE APIでメッセージ送信
     const { LineClient } = await import('@line-crm/line-sdk');
-    const lineClient = new LineClient(c.env.LINE_CHANNEL_ACCESS_TOKEN);
+    const lineClient = await resolveDeliveryClient(c.env.DB,getScope(c) ?? null);
     const messageType = body.messageType ?? 'text';
 
     if (messageType === 'text') {

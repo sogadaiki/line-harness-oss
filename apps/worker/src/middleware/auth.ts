@@ -31,8 +31,7 @@ export async function authMiddleware(c: Context<Env>, next: Next): Promise<Respo
     path === '/api/integrations/stripe/webhook' ||
     path.match(/^\/api\/webhooks\/incoming\/[^/]+\/receive$/) ||
     path.match(/^\/api\/forms\/[^/]+\/submit$/) ||
-    path.match(/^\/api\/forms\/[^/]+$/) || // GET form definition (public for LIFF)
-    path === '/api/meet-callback' || // Meet Harness completion callback
+    (c.req.method === 'GET' && path.match(/^\/api\/forms\/[^/]+$/) && !c.req.header('Authorization') && !c.req.header('Cookie')) ||
     path === '/api/qr' || // Public QR proxy — used by desktop landing pages
     path === '/api/auth/logout' // Logout clears cookie, no auth needed
   ) {

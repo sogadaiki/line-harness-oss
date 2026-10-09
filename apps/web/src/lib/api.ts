@@ -43,6 +43,10 @@ export type BroadcastInsight = {
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL
+let selectedAccountScope: string | null = null
+export function setApiAccountScope(accountId: string | null): void {
+  selectedAccountScope = accountId
+}
 if (!API_URL) {
   throw new Error(
     'NEXT_PUBLIC_API_URL is not set. Build cannot proceed without a valid API URL. ' +
@@ -84,6 +88,15 @@ function clearSessionAndRedirectToLogin(): void {
 }
 
 export async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+  // Capture the selected account synchronously when this operation is started.
+  // Account discovery and staff login are intentionally outside resource scope.
+  if (selectedAccountScope && path.startsWith('/api/') && !path.startsWith('/api/staff') && !path.startsWith('/api/auth/') && path.split('?')[0] !== '/api/line-accounts') {
+    const url = new URL(path, 'https://local.invalid')
+    const explicit = url.searchParams.get('lineAccountId') || url.searchParams.get('accountId')
+    if (explicit && explicit !== selectedAccountScope) throw new Error('選択中のLINEと操作対象が一致しません')
+    if (!url.searchParams.has('lineAccountId') && !url.searchParams.has('accountId')) url.searchParams.set('lineAccountId', selectedAccountScope)
+    path = url.pathname + url.search
+  }
   const token = getBearerToken()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -105,7 +118,10 @@ export async function fetchApi<T>(path: string, options?: RequestInit): Promise<
     clearSessionAndRedirectToLogin()
     throw new Error('Session expired')
   }
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null) as {error?:string} | null
+    throw new Error(detail?.error || `API error: ${res.status}`)
+  }
   return res.json() as Promise<T>
 }
 
@@ -119,6 +135,8 @@ export type FriendListParams = {
 export type FriendWithTags = Friend & { tags: Tag[] }
 
 export const api = {
+  stop: (kind: 'broadcasts' | 'scenarios' | 'all-automation') =>
+    fetchApi<ApiResponse<{accountId: string; kind: string; changed: number; remaining: Record<string,number>}>>('/api/account-stop', {method:'POST',body:JSON.stringify({kind})}),
   friends: {
     list: (params?: FriendListParams) => {
       const query: Record<string, string> = {}
@@ -196,6 +214,7 @@ export const api = {
       }),
   },
   broadcasts: {
+    preview: (id: string) => fetchApi<ApiResponse<{accountId:string;accountName:string;title:string;targetType:string;recipientCount:number;countKind:string}>>(`/api/broadcasts/${id}/preview`),
     list: (params?: { accountId?: string }) => {
       const query = params?.accountId ? '?lineAccountId=' + params.accountId : ''
       return fetchApi<ApiResponse<ApiBroadcast[]>>('/api/broadcasts' + query)

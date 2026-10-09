@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { HTTPException } from 'hono/http-exception';
 import {
   getForms,
   getFormById,
@@ -14,6 +15,8 @@ import { addTagToFriend, enrollFriendInScenario } from '@line-crm/db';
 import type { Form as DbForm, FormSubmission as DbFormSubmission } from '@line-crm/db';
 import type { Env } from '../index.js';
 import { getScope } from '../utils/scope.js';
+import { verifyAccountIdentity } from '../services/line-identity.js';
+import { resolveDeliveryClient } from '../services/line-client-resolver.js';
 
 const forms = new Hono<Env>();
 
@@ -69,7 +72,9 @@ forms.get('/api/forms/:id', async (c) => {
     if (!form) {
       return c.json({ success: false, error: 'Form not found' }, 404);
     }
-    return c.json({ success: true, data: serializeForm(form) });
+    const data=serializeForm(form);
+    if (!c.get('staff')) data.onSubmitWebhookHeaders=null;
+    return c.json({ success: true, data });
   } catch (err) {
     console.error('GET /api/forms/:id error:', err);
     return c.json({ success: false, error: 'Internal server error' }, 500);
@@ -216,9 +221,11 @@ forms.post('/api/forms/:id/submit', async (c) => {
       friendId?: string;
       data?: Record<string, unknown>;
       _skipWebhook?: boolean;
+      idToken?: string;
     }>();
 
     const submissionData = body.data ?? {};
+    if (!form.line_account_id) return c.json({success:false,error:'Form account is not assigned'},409);
 
     // Validate required fields
     const fields = JSON.parse(form.fields || '[]') as Array<{
@@ -243,15 +250,22 @@ forms.post('/api/forms/:id/submit', async (c) => {
     // Resolve friend by lineUserId or friendId
     let friendId: string | null = body.friendId ?? null;
     if (!friendId && body.lineUserId) {
-      const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId);
+      const friend = await getFriendByLineUserId(c.env.DB, body.lineUserId, form.line_account_id);
       if (friend) {
         friendId = friend.id;
       }
     }
+    if ((body.friendId || body.lineUserId) && !friendId) return c.json({success:false,error:'Friend not found in form account'},404);
+    if (friendId) {
+      const friend=await getFriendById(c.env.DB,friendId);
+      if (!friend || friend.line_account_id !== form.line_account_id) return c.json({success:false,error:'Friend not found in form account'},404);
+      await verifyAccountIdentity(c.env.DB,form.line_account_id,body.idToken,friend.line_user_id);
+    }
 
     // Webhook gate — skip if client pre-verified via repliers endpoint
     delete submissionData._webhookVerified;
-    const skipWebhook = Boolean(body._skipWebhook);
+    // A client-side check cannot bypass the authoritative webhook gate.
+    const skipWebhook = false;
     delete submissionData._skipWebhook;
     let webhookData: Record<string, unknown> | null = null;
     if (form.on_submit_webhook_url && !skipWebhook) {
@@ -263,14 +277,7 @@ forms.post('/api/forms/:id/submit', async (c) => {
           const friend = await getFriendById(c.env.DB, friendId);
           if (friend?.line_user_id) {
             try {
-              const { LineClient } = await import('@line-crm/line-sdk');
-              let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
-              if ((friend as unknown as Record<string, unknown>).line_account_id) {
-                const { getLineAccountById } = await import('@line-crm/db');
-                const account = await getLineAccountById(c.env.DB, (friend as unknown as Record<string, unknown>).line_account_id as string);
-                if (account) accessToken = account.channel_access_token;
-              }
-              const lineClient = new LineClient(accessToken);
+              const lineClient = await resolveDeliveryClient(c.env.DB,friend.line_account_id);
               await lineClient.pushMessage(friend.line_user_id, [{ type: 'text', text: form.on_submit_webhook_fail_message }]);
             } catch (e) {
               console.error('Failed to send webhook fail message:', e);
@@ -333,14 +340,7 @@ forms.post('/api/forms/:id/submit', async (c) => {
           (async () => {
             const friend = await getFriendById(db, friendId!);
             if (!friend?.line_user_id) return;
-            const { LineClient } = await import('@line-crm/line-sdk');
-            let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
-            if ((friend as unknown as Record<string, unknown>).line_account_id) {
-              const { getLineAccountById } = await import('@line-crm/db');
-              const account = await getLineAccountById(db, (friend as unknown as Record<string, unknown>).line_account_id as string);
-              if (account) accessToken = account.channel_access_token;
-            }
-            const lineClient = new LineClient(accessToken);
+            const lineClient = await resolveDeliveryClient(db,friend.line_account_id);
             const joinUrl = String(webhookData!.join_url);
             const meetFlex = {
               type: 'bubble',
@@ -385,13 +385,7 @@ forms.post('/api/forms/:id/submit', async (c) => {
           console.log('Form reply: sending to', friend.line_user_id);
           const { LineClient } = await import('@line-crm/line-sdk');
           // Resolve access token from friend's account (multi-account support)
-          let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
-          if ((friend as unknown as Record<string, unknown>).line_account_id) {
-            const { getLineAccountById } = await import('@line-crm/db');
-            const account = await getLineAccountById(db, (friend as unknown as Record<string, unknown>).line_account_id as string);
-            if (account) accessToken = account.channel_access_token;
-          }
-          const lineClient = new LineClient(accessToken);
+          const lineClient = await resolveDeliveryClient(db,friend.line_account_id);
           const { buildMessage, expandVariables } = await import('../services/step-delivery.js');
           const apiOrigin = new URL(c.req.url).origin;
           const { resolveMetadata } = await import('../services/step-delivery.js');
@@ -466,6 +460,7 @@ forms.post('/api/forms/:id/submit', async (c) => {
     return c.json({ success: true, data: serializeSubmission(submission) }, 201);
   } catch (err) {
     console.error('POST /api/forms/:id/submit error:', err);
+    if (err instanceof HTTPException) throw err;
     return c.json({ success: false, error: 'Internal server error' }, 500);
   }
 });

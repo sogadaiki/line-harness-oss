@@ -7,6 +7,7 @@ import {
   recordLinkClick,
   getLinkClicks,
   getFriendByLineUserId,
+  getFriendById,
 } from '@line-crm/db';
 import { addTagToFriend, enrollFriendInScenario } from '@line-crm/db';
 import type { TrackedLink } from '@line-crm/db';
@@ -206,7 +207,7 @@ trackedLinks.get('/t/:linkId', async (c) => {
   // Look up the link first
   const link = await getTrackedLinkById(c.env.DB, linkId);
 
-  if (!link || !link.is_active) {
+  if (!link || !link.is_active || !link.line_account_id || (c.env.SCOPED_LINE_ACCOUNT_ID && link.line_account_id !== c.env.SCOPED_LINE_ACCOUNT_ID)) {
     return c.json({ success: false, error: 'Link not found' }, 404);
   }
 
@@ -224,10 +225,15 @@ trackedLinks.get('/t/:linkId', async (c) => {
 
   // Resolve friendId from LINE user ID if provided
   if (!friendId && lineUserId) {
-    const friend = await getFriendByLineUserId(c.env.DB, lineUserId);
+    const friend = await getFriendByLineUserId(c.env.DB, lineUserId, link.line_account_id);
     if (friend) {
       friendId = friend.id;
     }
+  }
+
+  if (friendId) {
+    const friend = await getFriendById(c.env.DB,friendId);
+    if (friend?.line_account_id !== link.line_account_id) return c.json({success:false,error:'Friend not found in link account'},404);
   }
 
   // Run side-effects async (click recording, tag/scenario actions)

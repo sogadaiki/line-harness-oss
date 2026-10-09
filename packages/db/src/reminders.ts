@@ -3,6 +3,7 @@ import { jstNow } from './utils.js';
 
 export interface ReminderRow {
   id: string;
+  line_account_id: string | null;
   name: string;
   description: string | null;
   is_active: number;
@@ -42,12 +43,12 @@ export async function getReminderById(db: D1Database, id: string): Promise<Remin
 
 export async function createReminder(
   db: D1Database,
-  input: { name: string; description?: string },
+  input: { name: string; description?: string; lineAccountId?: string | null; isActive?: boolean },
 ): Promise<ReminderRow> {
   const id = crypto.randomUUID();
   const now = jstNow();
-  await db.prepare(`INSERT INTO reminders (id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
-    .bind(id, input.name, input.description ?? null, now, now).run();
+  await db.prepare(`INSERT INTO reminders (id, name, description, line_account_id, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .bind(id, input.name, input.description ?? null, input.lineAccountId ?? null, input.isActive ? 1 : 0, now, now).run();
   return (await getReminderById(db, id))!;
 }
 
@@ -66,6 +67,7 @@ export async function updateReminder(
   values.push(jstNow());
   values.push(id);
   await db.prepare(`UPDATE reminders SET ${sets.join(', ')} WHERE id = ?`).bind(...values).run();
+  if (updates.isActive === false) await db.prepare(`UPDATE friend_reminders SET status='cancelled', updated_at=? WHERE reminder_id=? AND status='active'`).bind(jstNow(),id).run();
 }
 
 export async function deleteReminder(db: D1Database, id: string): Promise<void> {
@@ -103,6 +105,8 @@ export async function enrollFriendInReminder(
 ): Promise<FriendReminderRow> {
   const id = crypto.randomUUID();
   const now = jstNow();
+  const eligible = await db.prepare(`SELECT f.id FROM friends f JOIN reminders r ON r.id=? JOIN line_accounts a ON a.id=f.line_account_id WHERE f.id=? AND f.is_following=1 AND r.is_active=1 AND a.is_active=1 AND r.line_account_id=f.line_account_id`).bind(input.reminderId,input.friendId).first();
+  if (!eligible) throw new Error('Reminder enrollment requires a matching active account');
   await db.prepare(`INSERT INTO friend_reminders (id, friend_id, reminder_id, target_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
     .bind(id, input.friendId, input.reminderId, input.targetDate, now, now).run();
   return (await db.prepare(`SELECT * FROM friend_reminders WHERE id = ?`).bind(id).first<FriendReminderRow>())!;
@@ -125,7 +129,8 @@ export async function getDueReminderDeliveries(db: D1Database, now: string): Pro
   const activeReminders = await db
     .prepare(`SELECT fr.* FROM friend_reminders fr
               INNER JOIN reminders r ON r.id = fr.reminder_id
-              WHERE fr.status = 'active' AND r.is_active = 1`)
+              JOIN friends f ON f.id=fr.friend_id JOIN line_accounts a ON a.id=f.line_account_id
+              WHERE fr.status = 'active' AND r.is_active = 1 AND a.is_active=1 AND f.is_following=1 AND r.line_account_id=f.line_account_id`)
     .all<FriendReminderRow>();
 
   const results: Array<FriendReminderRow & { steps: ReminderStepRow[] }> = [];
@@ -155,7 +160,8 @@ export async function getDueReminderDeliveries(db: D1Database, now: string): Pro
 /** 配信済みを記録 */
 export async function markReminderStepDelivered(db: D1Database, friendReminderId: string, reminderStepId: string): Promise<void> {
   const id = crypto.randomUUID();
-  await db.prepare(`INSERT OR IGNORE INTO friend_reminder_deliveries (id, friend_reminder_id, reminder_step_id) VALUES (?, ?, ?)`)
+  await db.prepare(`INSERT INTO friend_reminder_deliveries (id, friend_reminder_id, reminder_step_id,status) VALUES (?, ?, ?,'sent')
+    ON CONFLICT(friend_reminder_id,reminder_step_id) DO UPDATE SET status='sent',delivered_at=excluded.delivered_at`)
     .bind(id, friendReminderId, reminderStepId).run();
 }
 
@@ -163,11 +169,11 @@ export async function markReminderStepDelivered(db: D1Database, friendReminderId
 export async function completeReminderIfDone(db: D1Database, friendReminderId: string, reminderId: string): Promise<void> {
   const totalSteps = await db.prepare(`SELECT COUNT(*) as count FROM reminder_steps WHERE reminder_id = ?`)
     .bind(reminderId).first<{ count: number }>();
-  const deliveredSteps = await db.prepare(`SELECT COUNT(*) as count FROM friend_reminder_deliveries WHERE friend_reminder_id = ?`)
+  const deliveredSteps = await db.prepare(`SELECT COUNT(*) as count FROM friend_reminder_deliveries WHERE friend_reminder_id = ? AND status='sent'`)
     .bind(friendReminderId).first<{ count: number }>();
 
   if (totalSteps && deliveredSteps && deliveredSteps.count >= totalSteps.count) {
-    await db.prepare(`UPDATE friend_reminders SET status = 'completed', updated_at = ? WHERE id = ?`)
+    await db.prepare(`UPDATE friend_reminders SET status = 'completed', updated_at = ? WHERE id = ? AND status='active'`)
       .bind(jstNow(), friendReminderId).run();
   }
 }

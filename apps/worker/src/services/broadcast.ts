@@ -13,6 +13,7 @@ import { LineClient } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js';
 import { resolveDeliveryClient } from './line-client-resolver.js';
+import { claimBroadcast, assertBroadcastSending, finishBroadcast, failBroadcast } from './broadcast-state.js';
 
 const MULTICAST_BATCH_SIZE = 500;
 
@@ -22,20 +23,21 @@ export async function processBroadcastSend(
   broadcastId: string,
   workerUrl?: string,
 ): Promise<Broadcast> {
-  // Mark as sending
-  await updateBroadcastStatus(db, broadcastId, 'sending');
-
   const broadcast = await getBroadcastById(db, broadcastId);
   if (!broadcast) {
     throw new Error(`Broadcast ${broadcastId} not found`);
   }
+  const accountId = broadcast.line_account_id;
+  if (!accountId) throw new Error('Broadcast account is required');
+  lineClient = await resolveDeliveryClient(db,accountId);
+  if (!['all','tag'].includes(broadcast.target_type)) throw new Error('Unknown broadcast target');
 
   // Auto-wrap URLs with tracking links (text with URLs → Flex with button)
   let finalType: string = broadcast.message_type;
   let finalContent = broadcast.message_content;
   if (workerUrl) {
     const { autoTrackContent } = await import('./auto-track.js');
-    const tracked = await autoTrackContent(db, broadcast.message_type, broadcast.message_content, workerUrl);
+    const tracked = await autoTrackContent(db, broadcast.message_type, broadcast.message_content, workerUrl, accountId);
     finalType = tracked.messageType;
     finalContent = tracked.content;
   }
@@ -43,9 +45,13 @@ export async function processBroadcastSend(
   const message = buildMessage(finalType, finalContent, altText || undefined);
   let totalCount = 0;
   let successCount = 0;
+  await claimBroadcast(db,broadcastId);
 
   try {
     if (broadcast.target_type === 'all') {
+      await assertBroadcastSending(db,broadcastId);
+      // Record an attempt before the network call; ambiguous failures must not be blindly resent.
+      await updateBroadcastLineRequestId(db,broadcast.id,null,`bcast_${broadcast.id.slice(0,8)}`);
       // Use LINE broadcast API (sends to all followers)
       const { requestId } = await lineClient.broadcast([message]);
       await updateBroadcastLineRequestId(db, broadcast.id, requestId, null);
@@ -58,7 +64,10 @@ export async function processBroadcastSend(
       }
 
       const friends = await getFriendsByTag(db, broadcast.target_tag_id);
-      const followingFriends = friends.filter((f) => f.is_following);
+      const tag = await db.prepare('SELECT line_account_id FROM tags WHERE id=?').bind(broadcast.target_tag_id).first<{line_account_id:string|null}>();
+      if (tag?.line_account_id !== accountId) throw new Error('Broadcast tag belongs to another account');
+      const followingFriends = friends.filter((f) => f.is_following && f.line_account_id===accountId);
+      if (!followingFriends.length) throw new Error('No recipients in selected account');
       totalCount = followingFriends.length;
 
       // Group friends by line_account_id so each group uses the correct LineClient.
@@ -74,6 +83,7 @@ export async function processBroadcastSend(
 
       const now = jstNow();
       const unit = `bcast_${broadcast.id.slice(0, 8)}`;
+      await updateBroadcastLineRequestId(db,broadcast.id,null,unit);
       let globalBatchIndex = 0;
       const totalBatches = Math.ceil(followingFriends.length / MULTICAST_BATCH_SIZE);
 
@@ -110,6 +120,7 @@ export async function processBroadcastSend(
           }
 
           try {
+            await assertBroadcastSending(db,broadcastId);
             await groupClient.multicast(lineUserIds, [batchMessage], [unit]);
             successCount += batch.length;
 
@@ -126,7 +137,7 @@ export async function processBroadcastSend(
             }
           } catch (err) {
             console.error(`Multicast batch ${batchIndex} failed:`, err);
-            // Continue with next batch; failed batch is not logged
+            throw err;
           }
         }
       }
@@ -134,10 +145,9 @@ export async function processBroadcastSend(
     }
 
     await createBroadcastInsight(db, broadcast.id);
-    await updateBroadcastStatus(db, broadcastId, 'sent', { totalCount, successCount });
+    await finishBroadcast(db, broadcastId, totalCount, successCount);
   } catch (err) {
-    // On failure, reset to draft so it can be retried
-    await updateBroadcastStatus(db, broadcastId, 'draft');
+    await failBroadcast(db, broadcastId, totalCount, successCount);
     throw err;
   }
 
@@ -148,9 +158,10 @@ export async function processScheduledBroadcasts(
   db: D1Database,
   lineClient: LineClient,
   workerUrl?: string,
+  accountScope?: string,
 ): Promise<void> {
   const now = jstNow();
-  const allBroadcasts = await getBroadcasts(db);
+  const allBroadcasts = await getBroadcasts(db,accountScope);
 
   const nowMs = Date.now();
   const scheduled = allBroadcasts.filter(
@@ -166,7 +177,8 @@ export async function processScheduledBroadcasts(
   for (const broadcast of scheduled) {
     try {
       // broadcast.line_account_id でアカウント固有 client を解決
-      const broadcastAccountId = (broadcast as unknown as Record<string, unknown>).line_account_id as string | null;
+      const broadcastAccountId = broadcast.line_account_id;
+      if (!broadcastAccountId) continue;
       let broadcastClient: LineClient;
       if (broadcastAccountId) {
         if (clientCache.has(broadcastAccountId)) {

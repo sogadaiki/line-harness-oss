@@ -1,9 +1,10 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
+import { useAccount } from '@/contexts/account-context'
 
 type ActionStatus = 'idle' | 'confirming' | 'executing' | 'done' | 'error'
 
@@ -13,20 +14,17 @@ interface EmergencyAction {
   description: string
   status: ActionStatus
   errorMessage?: string
+  resultMessage?: string
 }
 
 const emergencyPrompts = [
   {
-    title: '緊急: 全配信を停止するプロンプト',
-    prompt: `LINE CRM の全配信を即時停止してください。
-1. broadcasts の status が scheduled のものを全て draft に変更
-2. scenarios の isActive を全て false に変更
-3. automations の isActive を全て false に変更
-完了後、停止した件数を報告してください。`,
+    title: '緊急停止の確認手順',
+    prompt: `画面で選択したLINEのIDと名前を照合し、他のLINEに影響しない停止手順を説明してください。停止はこの画面の対象確認と実行ボタンで行います。すでにLINE APIへ渡した送信は取消できません。`,
   },
   {
-    title: '緊急: アカウント移行プロンプト',
-    prompt: `LINE CRM のアカウント移行を実行してください。
+    title: 'アカウント移行の確認手順',
+    prompt: `LINE CRM のアカウント移行の確認手順を説明してください。移行実行は別途承認が必要です。
 1. /health ページで現在のアカウント状態を確認
 2. BAN リスクが高いアカウントを特定
 3. 移行先アカウントを選択して移行を実行
@@ -35,17 +33,26 @@ const emergencyPrompts = [
 ]
 
 export default function EmergencyPage() {
+  const {selectedAccountId, selectedAccount} = useAccount()
+  const currentAccount = useRef(selectedAccountId)
+  currentAccount.current = selectedAccountId
   const [actions, setActions] = useState<EmergencyAction[]>([
     {
       id: 'stop-broadcasts',
-      label: '全配信停止',
-      description: 'スケジュール済みの一斉配信を全て下書きに戻します',
+      label: '予約一斉配信を停止',
+      description: '選択アカウントの予約と残りの一斉配信を下書きへ戻します',
       status: 'idle',
     },
     {
       id: 'stop-scenarios',
       label: 'シナリオ一括停止',
-      description: '全てのアクティブなシナリオ配信を無効化します',
+      description: '選択アカウントのシナリオと登録済みの個人配信を停止します',
+      status: 'idle',
+    },
+    {
+      id: 'stop-automation',
+      label: '自動送信を停止',
+      description: '選択アカウントの予約・シナリオ・自動応答・自動化・リマインダ・送信Webhookを停止します',
       status: 'idle',
     },
     {
@@ -55,6 +62,7 @@ export default function EmergencyPage() {
       status: 'idle',
     },
   ])
+  useEffect(() => {setActions(prev=>prev.map(a=>({...a,status:'idle',errorMessage:undefined,resultMessage:undefined})))},[selectedAccountId])
 
   const updateAction = (id: string, updates: Partial<EmergencyAction>) => {
     setActions((prev) =>
@@ -63,11 +71,12 @@ export default function EmergencyPage() {
   }
 
   const handleAction = async (id: string) => {
+    if (!selectedAccountId) return
     const action = actions.find((a) => a.id === id)
     if (!action) return
 
     if (action.status === 'idle' || action.status === 'done' || action.status === 'error') {
-      updateAction(id, { status: 'confirming', errorMessage: undefined })
+      updateAction(id, { status: 'confirming', errorMessage: undefined, resultMessage: undefined })
       return
     }
 
@@ -75,35 +84,23 @@ export default function EmergencyPage() {
       updateAction(id, { status: 'executing' })
 
       try {
-        if (id === 'stop-broadcasts') {
-          const res = await api.broadcasts.list()
-          if (res.success) {
-            const scheduled = res.data.filter((b) => b.status === 'scheduled')
-            await Promise.allSettled(
-              scheduled.map((b) => api.broadcasts.update(b.id, { scheduledAt: null }))
-            )
-          }
-        } else if (id === 'stop-scenarios') {
-          const res = await api.scenarios.list()
-          if (res.success) {
-            const active = res.data.filter((s) => s.isActive)
-            await Promise.allSettled(
-              active.map((s) => api.scenarios.update(s.id, { isActive: false }))
-            )
-          }
-        } else if (id === 'switch-account') {
+        if (id === 'switch-account') {
           window.location.href = '/health'
           return
         }
-        updateAction(id, { status: 'done' })
-      } catch {
-        updateAction(id, { status: 'error', errorMessage: '実行に失敗しました。再度お試しください。' })
+        const result=await api.stop(id==='stop-broadcasts'?'broadcasts':id==='stop-scenarios'?'scenarios':'all-automation')
+        if (currentAccount.current !== selectedAccountId) return
+        if (!result.success || result.data.accountId !== selectedAccountId) throw new Error('停止対象または結果の確認に失敗しました')
+        updateAction(id, { status: 'done',resultMessage:`${selectedAccount?.name ?? selectedAccountId}：停止後の残存件数を確認しました（更新 ${result.data.changed} 件）` })
+      } catch (error) {
+        if (currentAccount.current !== selectedAccountId) return
+        updateAction(id, { status: 'error', errorMessage: error instanceof Error ? error.message : '停止結果を確認できませんでした。対象LINEと残存配信を確認してください。' })
       }
     }
   }
 
   const handleCancel = (id: string) => {
-    updateAction(id, { status: 'idle', errorMessage: undefined })
+    updateAction(id, { status: 'idle', errorMessage: undefined, resultMessage: undefined })
   }
 
   const getStatusBadge = (status: ActionStatus) => {
@@ -137,6 +134,7 @@ export default function EmergencyPage() {
   return (
     <div>
       <Header title="緊急コントロール" />
+      <p className="mb-4 text-sm font-semibold">停止対象：{selectedAccount?.name ?? 'アカウントを選択してください'}</p>
 
       {/* Warning banner */}
       <div className="mb-6 p-4 bg-red-50 border-2 border-red-300 rounded-lg">
@@ -149,6 +147,7 @@ export default function EmergencyPage() {
             <p className="text-sm font-bold text-red-800">注意: この操作は即時実行されます</p>
             <p className="text-xs text-red-600 mt-1">
               各ボタンをクリックすると確認ダイアログが表示されます。「実行」で操作が開始されます。
+              既にLINEへ送信したメッセージや、LINE APIで処理中の送信は取り消せません。有人チャット返信は別の操作です。
             </p>
           </div>
         </div>
@@ -170,10 +169,11 @@ export default function EmergencyPage() {
             {action.errorMessage && (
               <p className="text-xs text-red-600 mb-3">{action.errorMessage}</p>
             )}
+            {action.resultMessage && <p className="text-xs text-green-700 mb-3">{action.resultMessage}</p>}
 
             {action.status === 'confirming' ? (
               <div className="space-y-2">
-                <p className="text-xs font-medium text-red-700">本当に実行しますか？</p>
+                <p className="text-xs font-medium text-red-700">「{selectedAccount?.name}」で「{action.label}」を実行しますか？</p>
                 <div className="flex gap-2">
                   <button
                     onClick={() => handleAction(action.id)}
@@ -192,7 +192,7 @@ export default function EmergencyPage() {
             ) : (
               <button
                 onClick={() => handleAction(action.id)}
-                disabled={action.status === 'executing'}
+                disabled={!selectedAccountId || action.status === 'executing'}
                 className="w-full px-3 py-2 min-h-[44px] text-sm font-medium text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-lg transition-colors"
               >
                 {action.status === 'executing' ? '実行中...' : action.label}

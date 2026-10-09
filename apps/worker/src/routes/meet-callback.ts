@@ -2,6 +2,8 @@ import { Hono } from 'hono';
 import type { Env } from '../index.js';
 import { getFriendByLineUserId } from '@line-crm/db';
 import { LineClient } from '@line-crm/line-sdk';
+import {getScope} from '../utils/scope.js';
+import {resolveDeliveryClient} from '../services/line-client-resolver.js';
 
 const app = new Hono<Env>();
 
@@ -25,19 +27,12 @@ app.post('/api/meet-callback', async (c) => {
     return c.json({ success: false, error: 'line_user_id required' }, 400);
   }
 
-  const friend = await getFriendByLineUserId(c.env.DB, body.line_user_id);
+  const friend = await getFriendByLineUserId(c.env.DB, body.line_user_id, getScope(c));
   if (!friend) {
     return c.json({ success: false, error: 'friend not found' }, 404);
   }
 
-  // Resolve LINE access token (multi-account support)
-  let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if ((friend as unknown as Record<string, unknown>).line_account_id) {
-    const { getLineAccountById } = await import('@line-crm/db');
-    const account = await getLineAccountById(c.env.DB, (friend as unknown as Record<string, unknown>).line_account_id as string);
-    if (account) accessToken = account.channel_access_token;
-  }
-  const lineClient = new LineClient(accessToken);
+  const lineClient = await resolveDeliveryClient(c.env.DB,friend.line_account_id);
 
   // Build Flex message with requirements doc
   const transcriptRows = body.transcripts.map((t) => ({

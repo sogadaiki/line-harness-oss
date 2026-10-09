@@ -55,7 +55,7 @@ export default function ScenariosPage() {
     description: '',
     triggerType: 'friend_add',
     triggerTagId: '',
-    isActive: true,
+    isActive: false,
   })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
@@ -98,7 +98,7 @@ export default function ScenariosPage() {
       })
       if (res.success) {
         setShowCreate(false)
-        setForm({ name: '', description: '', triggerType: 'friend_add', triggerTagId: '', isActive: true })
+        setForm({ name: '', description: '', triggerType: 'friend_add', triggerTagId: '', isActive: false })
         loadScenarios()
       } else {
         setFormError(res.error)

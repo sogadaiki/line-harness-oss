@@ -88,6 +88,8 @@ export interface CreateScenarioInput {
   description?: string | null;
   triggerType: ScenarioTriggerType;
   triggerTagId?: string | null;
+  lineAccountId?: string | null;
+  isActive?: boolean;
 }
 
 export async function createScenario(
@@ -99,8 +101,8 @@ export async function createScenario(
 
   await db
     .prepare(
-      `INSERT INTO scenarios (id, name, description, trigger_type, trigger_tag_id, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
+      `INSERT INTO scenarios (id, name, description, trigger_type, trigger_tag_id, line_account_id, is_active, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -108,6 +110,8 @@ export async function createScenario(
       input.description ?? null,
       input.triggerType,
       input.triggerTagId ?? null,
+      input.lineAccountId ?? null,
+      input.isActive === false ? 0 : 1,
       now,
       now,
     )
@@ -168,6 +172,10 @@ export async function updateScenario(
     .prepare(`UPDATE scenarios SET ${fields.join(', ')} WHERE id = ?`)
     .bind(...values)
     .run();
+
+  if (updates.is_active === 0) {
+    await db.prepare(`UPDATE friend_scenarios SET status='paused', next_delivery_at=NULL, updated_at=? WHERE scenario_id=? AND status='active'`).bind(now,id).run();
+  }
 
   return db
     .prepare(`SELECT * FROM scenarios WHERE id = ?`)
@@ -310,6 +318,10 @@ export async function enrollFriendInScenario(
   const id = crypto.randomUUID();
   const now = jstNow();
 
+  const eligibility = await db.prepare(`SELECT f.id FROM friends f JOIN scenarios s ON s.id=? JOIN line_accounts a ON a.id=f.line_account_id
+    WHERE f.id=? AND f.is_following=1 AND s.is_active=1 AND a.is_active=1 AND s.line_account_id=f.line_account_id`).bind(scenarioId,friendId).first();
+  if (!eligibility) throw new Error('Scenario enrollment requires an active matching account and following friend');
+
   // Get the first step to calculate next_delivery_at
   const firstStep = await db
     .prepare(
@@ -366,20 +378,27 @@ export async function enrollFriendInScenario(
 export async function getFriendScenariosDueForDelivery(
   db: D1Database,
   now: string,
+  accountScope?: string,
 ): Promise<FriendScenario[]> {
   // Fetch all active scenarios with a delivery time, then filter by epoch comparison
   // to handle mixed timestamp formats (Z and +09:00) during migration
   const result = await db
     .prepare(
-      `SELECT * FROM friend_scenarios
-       WHERE status = 'active'
-         AND next_delivery_at IS NOT NULL`,
+      `SELECT fs.*, f.line_account_id FROM friend_scenarios fs
+       JOIN scenarios s ON s.id=fs.scenario_id JOIN friends f ON f.id=fs.friend_id JOIN line_accounts a ON a.id=f.line_account_id
+       WHERE fs.status = 'active' AND s.is_active=1 AND a.is_active=1 AND f.is_following=1
+         AND s.line_account_id=f.line_account_id AND fs.next_delivery_at IS NOT NULL`,
     )
     .all<FriendScenario>();
   const nowMs = new Date(now).getTime();
   return result.results
+    .filter((fs) => !accountScope || (fs as FriendScenario & {line_account_id?:string}).line_account_id===accountScope)
     .filter((fs) => new Date(fs.next_delivery_at!).getTime() <= nowMs)
     .sort((a, b) => new Date(a.next_delivery_at!).getTime() - new Date(b.next_delivery_at!).getTime());
+}
+
+export async function isScenarioDeliveryAllowed(db:D1Database,enrollmentId:string):Promise<boolean> {
+  return Boolean(await db.prepare(`SELECT fs.id FROM friend_scenarios fs JOIN scenarios s ON s.id=fs.scenario_id JOIN friends f ON f.id=fs.friend_id JOIN line_accounts a ON a.id=f.line_account_id WHERE fs.id=? AND fs.status='active' AND s.is_active=1 AND a.is_active=1 AND f.is_following=1 AND s.line_account_id=f.line_account_id`).bind(enrollmentId).first());
 }
 
 export async function advanceFriendScenario(
@@ -395,7 +414,7 @@ export async function advanceFriendScenario(
        SET current_step_order = ?,
            next_delivery_at = ?,
            updated_at = ?
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'active'`,
     )
     .bind(nextStepOrder, nextDeliveryAt ?? null, now, id)
     .run();
@@ -412,7 +431,7 @@ export async function completeFriendScenario(
        SET status = 'completed',
            next_delivery_at = NULL,
            updated_at = ?
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'active'`,
     )
     .bind(now, id)
     .run();

@@ -202,11 +202,12 @@ friends.post('/api/friends/:id/tags', async (c) => {
 
     const db = c.env.DB;
     await addTagToFriend(db, friendId, body.tagId);
+    const accountId = getScope(c);
 
     // Enroll in tag_added scenarios that match this tag
     const allScenarios = await getScenarios(db);
     for (const scenario of allScenarios) {
-      if (scenario.trigger_type === 'tag_added' && scenario.is_active && scenario.trigger_tag_id === body.tagId) {
+      if (scenario.line_account_id === accountId && scenario.trigger_type === 'tag_added' && scenario.is_active && scenario.trigger_tag_id === body.tagId) {
         const existing = await db
           .prepare(`SELECT id FROM friend_scenarios WHERE friend_id = ? AND scenario_id = ?`)
           .bind(friendId, scenario.id)
@@ -320,15 +321,8 @@ friends.post('/api/friends/:id/messages', async (c) => {
       return c.json({ success: false, error: 'Friend not found' }, 404);
     }
 
-    const { LineClient } = await import('@line-crm/line-sdk');
-    // Resolve access token from friend's account (multi-account support)
-    let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
-    if ((friend as unknown as Record<string, unknown>).line_account_id) {
-      const { getLineAccountById } = await import('@line-crm/db');
-      const account = await getLineAccountById(db, (friend as unknown as Record<string, unknown>).line_account_id as string);
-      if (account) accessToken = account.channel_access_token;
-    }
-    const lineClient = new LineClient(accessToken);
+    const { resolveDeliveryClient } = await import('../services/line-client-resolver.js');
+    const lineClient = await resolveDeliveryClient(db, friend.line_account_id);
     const messageType = body.messageType ?? 'text';
 
     // Auto-wrap URLs with tracking links (text with URLs → Flex with button)
@@ -336,6 +330,7 @@ friends.post('/api/friends/:id/messages', async (c) => {
     const tracked = await autoTrackContent(
       db, messageType, body.content,
       c.env.WORKER_URL || new URL(c.req.url).origin,
+      friend.line_account_id!,
     );
 
     const message = buildMessage(tracked.messageType, tracked.content, body.altText);

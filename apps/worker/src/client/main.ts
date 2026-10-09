@@ -130,6 +130,7 @@ function showFriendAdd(profile: { displayName: string; pictureUrl?: string }) {
                 body: JSON.stringify({
                   lineUserId: fp.userId,
                   formId: formParam,
+                  idToken: liff.getIDToken(),
                 }),
               });
             } catch { /* best-effort */ }
@@ -262,6 +263,7 @@ async function linkAndAddFlow() {
             body: JSON.stringify({
               lineUserId: profile.userId,
               formId: formParam,
+              idToken: liff.getIDToken(),
             }),
           });
         } catch { /* best-effort */ }

@@ -12,7 +12,7 @@ let lastInsightRun = 0
 export async function processInsightFetch(
   db: D1Database,
   lineClients: Map<string, LineClient>,
-  defaultLineClient: LineClient,
+  _defaultLineClient: LineClient,
 ): Promise<void> {
   const now = Date.now()
   if (now - lastInsightRun < INSIGHT_INTERVAL_MS) {
@@ -24,10 +24,9 @@ export async function processInsightFetch(
   if (pending.length === 0) return
 
   for (const item of pending) {
+    if (!item.lineAccountId || !lineClients.has(item.lineAccountId)) continue;
     try {
-      const client =
-        (item.lineAccountId && lineClients.get(item.lineAccountId)) ||
-        defaultLineClient
+      const client = lineClients.get(item.lineAccountId)!
 
       if (item.lineRequestId) {
         // Broadcast — use message event insight

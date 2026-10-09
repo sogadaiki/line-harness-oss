@@ -631,7 +631,7 @@ async function submitForm(): Promise<void> {
       const rawMsg = state.formDef.onSubmitMessageContent || '条件をクリアしました！';
       const successMsg = rawMsg.trimStart().startsWith('{') ? '特典をLINEでお送りしました！' : rawMsg;
       // Fall through to submit below, then show webhook success
-      const webhookBody: Record<string, unknown> = { data: { ...data }, _skipWebhook: true };
+      const webhookBody: Record<string, unknown> = { data: { ...data }, idToken: liff.getIDToken() };
       if (state.profile?.userId) webhookBody.lineUserId = state.profile.userId;
 
       const webhookSubmitRes = await apiCall(`/api/forms/${state.formDef.id}/submit`, {
@@ -653,7 +653,7 @@ async function submitForm(): Promise<void> {
       return;
     }
 
-    const body: Record<string, unknown> = { data };
+    const body: Record<string, unknown> = { data, idToken: liff.getIDToken() };
     if (state.profile?.userId) body.lineUserId = state.profile.userId;
     // Note: state.friendId is users.id (UUID), not friends.id — don't send as friendId
     console.log('Submitting to:', `/api/forms/${state.formDef.id}/submit`);

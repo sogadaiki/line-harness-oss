@@ -7,7 +7,7 @@ import {
   deleteBroadcast,
 } from '@line-crm/db';
 import type { Broadcast as DbBroadcast, BroadcastMessageType, BroadcastTargetType } from '@line-crm/db';
-import { LineClient } from '@line-crm/line-sdk';
+import { resolveDeliveryClient } from '../services/line-client-resolver.js';
 import { processBroadcastSend } from '../services/broadcast.js';
 import { processSegmentSend } from '../services/segment-send.js';
 import type { SegmentCondition } from '../services/segment-query.js';
@@ -110,12 +110,12 @@ broadcasts.post('/api/broadcasts', async (c) => {
       targetType: body.targetType,
       targetTagId: body.targetTagId ?? null,
       scheduledAt: body.scheduledAt ?? null,
+      lineAccountId: getScope(c),
     });
 
     // Save line_account_id and alt_text if provided
     const updates: string[] = [];
     const binds: unknown[] = [];
-    if (body.lineAccountId) { updates.push('line_account_id = ?'); binds.push(body.lineAccountId); }
     if (body.altText) { updates.push('alt_text = ?'); binds.push(body.altText); }
     if (updates.length > 0) {
       binds.push(broadcast.id);
@@ -189,6 +189,19 @@ broadcasts.delete('/api/broadcasts/:id', async (c) => {
 });
 
 // POST /api/broadcasts/:id/send - send now
+// Preview has no LINE API calls. Native broadcast's actual audience can differ from the local ledger.
+broadcasts.get('/api/broadcasts/:id/preview', async c => {
+  const item = await getBroadcastById(c.env.DB,c.req.param('id'));
+  if (!item) return c.json({success:false,error:'Broadcast not found'},404);
+  const accountId=getScope(c)!;
+  const account=await c.env.DB.prepare('SELECT name FROM line_accounts WHERE id=?').bind(accountId).first<{name:string}>();
+  const query=item.target_type==='tag'
+    ? `SELECT COUNT(DISTINCT f.id) AS n FROM friends f JOIN friend_tags ft ON ft.friend_id=f.id JOIN tags t ON t.id=ft.tag_id WHERE f.line_account_id=? AND f.is_following=1 AND t.line_account_id=? AND t.id=?`
+    : `SELECT COUNT(*) AS n FROM friends WHERE line_account_id=? AND is_following=1`;
+  const count=await c.env.DB.prepare(query).bind(...(item.target_type==='tag'?[accountId,accountId,item.target_tag_id]:[accountId])).first<{n:number}>();
+  return c.json({success:true,data:{accountId,accountName:account?.name,title:item.title,targetType:item.target_type,recipientCount:count?.n??0,countKind:item.target_type==='all'?'local-estimate':'matched-friends'}});
+});
+
 broadcasts.post('/api/broadcasts/:id/send', async (c) => {
   try {
     const id = c.req.param('id');
@@ -202,14 +215,7 @@ broadcasts.post('/api/broadcasts/:id/send', async (c) => {
       return c.json({ success: false, error: 'Broadcast is already sent or sending' }, 400);
     }
 
-    let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
-    const broadcastAccountId = (existing as unknown as Record<string, unknown>).line_account_id;
-    if (broadcastAccountId) {
-      const { getLineAccountById } = await import('@line-crm/db');
-      const account = await getLineAccountById(c.env.DB, broadcastAccountId as string);
-      if (account) accessToken = account.channel_access_token;
-    }
-    const lineClient = new LineClient(accessToken);
+    const lineClient = await resolveDeliveryClient(c.env.DB,existing.line_account_id);
     await processBroadcastSend(c.env.DB, lineClient, id, c.env.WORKER_URL);
 
     const result = await getBroadcastById(c.env.DB, id);
@@ -243,14 +249,7 @@ broadcasts.post('/api/broadcasts/:id/send-segment', async (c) => {
       );
     }
 
-    let segAccessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
-    const segAccountId = (existing as unknown as Record<string, unknown>).line_account_id;
-    if (segAccountId) {
-      const { getLineAccountById } = await import('@line-crm/db');
-      const account = await getLineAccountById(c.env.DB, segAccountId as string);
-      if (account) segAccessToken = account.channel_access_token;
-    }
-    const lineClient = new LineClient(segAccessToken);
+    const lineClient = await resolveDeliveryClient(c.env.DB,existing.line_account_id);
     await processSegmentSend(c.env.DB, lineClient, id, body.conditions);
 
     const result = await getBroadcastById(c.env.DB, id);
@@ -315,14 +314,8 @@ broadcasts.post('/api/broadcasts/:id/fetch-insight', async (c) => {
     }
 
     // LINE APIクライアントを解決
-    let accessToken = c.env.LINE_CHANNEL_ACCESS_TOKEN;
     const accountId = rawBroadcast?.line_account_id || null;
-    if (accountId) {
-      const { getLineAccountById } = await import('@line-crm/db');
-      const account = await getLineAccountById(c.env.DB, accountId);
-      if (account) accessToken = account.channel_access_token;
-    }
-    const lineClient = new LineClient(accessToken);
+    const lineClient = await resolveDeliveryClient(c.env.DB,accountId);
 
     let delivered: number | null = null;
     let uniqueImpression: number | null = null;

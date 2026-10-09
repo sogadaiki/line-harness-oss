@@ -24,6 +24,7 @@ const BUTCH_THRESHOLD_HOURS = 24; // 面談日時から24h後にブッチ判定
 export async function processInterviewButchDetection(
   db: D1Database,
   lineAccessToken: string,
+  accountScope: string,
 ): Promise<void> {
   // 3時間毎に実行（cron自体は5分毎だが、ブッチ判定はアバウトでいい）
   const jstHour = new Date(Date.now() + 9 * 60 * 60_000).getUTCHours();
@@ -35,20 +36,20 @@ export async function processInterviewButchDetection(
 
   // 面談予約済タグを持つ全友だちを取得
   const bookedTag = await db
-    .prepare(`SELECT id FROM tags WHERE name = ?`)
-    .bind(INTERVIEW_BOOKED_TAG)
+    .prepare(`SELECT id FROM tags WHERE name = ? AND line_account_id = ?`)
+    .bind(INTERVIEW_BOOKED_TAG, accountScope)
     .first<{ id: string }>();
   if (!bookedTag) return;
 
   const butchTag = await db
-    .prepare(`SELECT id FROM tags WHERE name = ?`)
-    .bind(INTERVIEW_BUTCH_TAG)
+    .prepare(`SELECT id FROM tags WHERE name = ? AND line_account_id = ?`)
+    .bind(INTERVIEW_BUTCH_TAG, accountScope)
     .first<{ id: string }>();
   if (!butchTag) return;
 
   const doneTag = await db
-    .prepare(`SELECT id FROM tags WHERE name = ?`)
-    .bind(INTERVIEW_DONE_TAG)
+    .prepare(`SELECT id FROM tags WHERE name = ? AND line_account_id = ?`)
+    .bind(INTERVIEW_DONE_TAG, accountScope)
     .first<{ id: string }>();
 
   // 面談予約済タグを持ち、interview_datetimeがメタデータにある友だちを検索
@@ -57,9 +58,9 @@ export async function processInterviewButchDetection(
       SELECT f.id, f.metadata, f.line_account_id
       FROM friends f
       INNER JOIN friend_tags ft ON ft.friend_id = f.id
-      WHERE ft.tag_id = ? AND f.is_following = 1
+      WHERE ft.tag_id = ? AND f.is_following = 1 AND f.line_account_id = ?
     `)
-    .bind(bookedTag.id)
+    .bind(bookedTag.id, accountScope)
     .all<{ id: string; metadata: string | null; line_account_id: string | null }>();
 
   for (const friend of friends.results) {
@@ -99,7 +100,7 @@ export async function processInterviewButchDetection(
       // tag_added シナリオを自動起動
       const scenarios = await getScenarios(db);
       for (const scenario of scenarios) {
-        const accountMatch = !scenario.line_account_id || !friend.line_account_id || scenario.line_account_id === friend.line_account_id;
+        const accountMatch = scenario.line_account_id === accountScope;
         if (
           scenario.trigger_type === 'tag_added' &&
           scenario.is_active &&

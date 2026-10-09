@@ -1,65 +1,20 @@
 {
   "version": 1,
   "classifications": [
-    {
-      "text": "タグ付与は分類だけとは限りません。 現在のコードはタグ付与でシナリオや自動化を起動できます。実利用者へ付ける前に、どのルールが動くかを確認します。タグ作成専用の管理ページは現在ありません。",
-      "role": "A",
-      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
-    },
-    {
-      "text": "画像と解説を同時に返す場合、キーワード応答のコードは複数のLINEメッセージを配列で扱えます。Flexカードのpostbackも扱えますが、通常のテキスト受信とpostbackで処理経路が違うため、それぞれ端末で確認します。",
-      "role": "A",
-      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
-    },
-    {
-      "text": "LPの見え方、診断結果保存、友だち追加、画像受信、解説受信、相談申込、スタッフ確認の七つを分けて確認します。既存の友だちで成功しても、新規追加時の経路は別に試します。",
-      "role": "A",
-      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
-    },
-    {
-      "text": "応答後にメッセージ受信イベントの自動化も走り得ます。自動応答と自動化の重複を確認します。",
-      "role": "A",
-      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
-    },
-    {
-      "text": "初回の友だち追加処理には直接返信する経路がありますが、後続ステップは定期処理に依存します。参照した設定ファイルはUTC 0時・12時、JST 9時・21時の実行です。分単位の間隔を期待する場合は、実際の稼働中スケジュールも確認します。夜間の配信制限や揺らぎもコードにあります。",
-      "role": "A",
-      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
-    },
-    {
-      "text": "全員配信の実績「0」は、コードでは送信人数が不明な場合にも保存されます。ゼロ人に配信した証拠にせず、LINEの送信結果と後から取得する実績を確認します。",
-      "role": "A",
-      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
-    },
-    {
-      "text": "前日と直前の通知は、定期実行の頻度が目的に合うか確認します。面談取消時には、個人のリマインダ登録も取り消します。",
-      "role": "A",
-      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
-    },
-    {
-      "text": "復旧も対象を一つずつ確認します。保存日時・再開した時点の順序・期限切れ予約を見直してから再開し、まとめて有効化しません。",
-      "role": "A",
-      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
-    },
-    {
-      "text": "アカウントの保存先・送信先・停止対象をサーバーで限定し、条件の不一致を修正することが先です。その後、診断開始から新規友だちの結果受信、面談相談、スタッフ確認、追客停止までを本人のテストで通します。別アカウントにデータ・メッセージ・設定変更が発生しないことも確認します。",
-      "role": "A",
-      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
-    },
-    {
-      "text": "「画面確認」は実ブラウザ、「練習」は同じフロントの架空API、「関数確認」は実ソースの関数に架空イベントを渡した結果、「コード確認」は静的な追跡。稼働中バックエンドの完全一致と、過去の個別誤作動原因は未確定。顧客固有のデータ集計は共有プロジェクト記録だけに保存し、この文書やGitへ含めない。",
-      "role": "D",
-      "reason": "Evidence boundaries are necessary to distinguish source review and rehearsal from production verification."
-    },
-    {
-      "text": "左上に「練習用|本番送信なし」と表示されることを確認します。URLは127.0.0.1です。",
-      "role": "A",
-      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
-    },
-    {
-      "text": "「シナリオ配信」の練習シナリオを開き、「+ ステップ追加」で遅延1440分を指定します。追加後に「1日後」と表示されることを確認します。",
-      "role": "A",
-      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
-    }
+    {"text":"タグ付与は分類だけとは限りません。 現在のコードはタグ付与でシナリオや自動化を起動できます。実利用者へ付ける前に、どのルールが動くかを確認します。タグ作成専用の管理ページは現在ありません。","role":"A","reason":"Operator checks triggered sends before assigning tags."},
+    {"text":"画像と解説を同時に返す場合、キーワード応答のコードは複数のLINEメッセージを配列で扱えます。Flexカードのpostbackも扱えますが、通常のテキスト受信とpostbackで処理経路が違うため、それぞれ端末で確認します。","role":"A","reason":"Separate receipt checks are required for different event paths."},
+    {"text":"LPの見え方、診断結果保存、友だち追加、画像受信、解説受信、相談申込、スタッフ確認の七つを分けて確認します。既存の友だちで成功しても、新規追加時の経路は別に試します。","role":"A","reason":"Operator acceptance procedure."},
+    {"text":"所属未指定のルールは応答候補にしません。既存の未指定ルールを引き継ぐ場合も、設定担当者が正しい所属を確認します。","role":"A","reason":"Explains how to restore legacy rules without exporting another account's events."},
+    {"text":"応答後にメッセージ受信イベントの自動化も走り得ます。自動応答と自動化の重複を確認します。","role":"A","reason":"Required check to prevent duplicate responses."},
+    {"text":"ステップ編集の操作は次のとおりです。停止状態で内容を作り、保存後に再読込して確認します。","role":"A","reason":"Save and readback procedure for the operator."},
+    {"text":"全員配信の実績「0」は、コードでは送信人数が不明な場合にも保存されます。ゼロ人に配信した証拠にせず、LINEの送信結果と後から取得する実績を確認します。","role":"A","reason":"Prevents interpreting unknown delivery count as zero."},
+    {"text":"前日と直前の通知は、定期実行の頻度が目的に合うか確認します。面談取消時には、個人のリマインダ登録も取り消します。","role":"A","reason":"Operator timing and cancellation procedure."},
+    {"text":"復旧も対象を一つずつ確認します。保存日時・再開した時点の順序・期限切れ予約を見直してから再開し、まとめて有効化しません。","role":"A","reason":"Recovery procedure prevents a burst of obsolete sends."},
+    {"text":"本番への適用・権限設定・接続確認のあと、診断開始から新規友だちの結果受信、面談相談、スタッフ確認、追客停止までを本人のテストで通します。別アカウントにデータ・メッセージ・設定変更が発生しないことも確認します。","role":"A","reason":"Production acceptance procedure, not a progress promise."},
+    {"text":"管理者以外のアカウント権限を staff_line_accounts へ明示的に付与する。024は空の表を作り、既存スタッフへ自動で全権限を渡さない。現時点では専用の権限付与GUIはない。","role":"A","reason":"Administrator must configure grants before staff can operate."},
+    {"text":"復旧時はworker・UIの一組を戻し、DBは追加列を保ったまま扱います。旧版へ戻すと今回の誤作動経路も戻るため、そのまま自動配信を再開せず対象を限定して確認します。","role":"A","reason":"Administrator rollback instructions and restart boundary."},
+    {"text":"「画面確認」は実ブラウザ、「練習」は同じフロントの架空API、「関数確認」は実ソースの関数に架空イベントを渡した結果、「コード確認」は静的な追跡。稼働中バックエンドの完全一致と、過去の個別誤作動原因は未確定。顧客固有のデータ集計は共有プロジェクト記録だけに保存し、この文書やGitへ含めない。","role":"D","reason":"Evidence boundary in the audit section prevents treating historical source review as live proof."},
+    {"text":"練習ログイン で「APIキーでログイン」を選び fixture-owner-key を入力します。これは架空値です。画面に「架空LINE・外部送信なし」、URLに127.0.0.1が表示されることを確認します。","role":"A","reason":"Instructions for the offline rehearsal, using a dummy credential only."},
+    {"text":"APIには架空AとBを用意し、画面ではAだけ表示します。これは表示設定の検証です。サーバーの所属検証は、以下の回帰テストで別途確認します。","role":"A","reason":"Explains the rehearsal model and which check proves authorization."}
   ]
 }

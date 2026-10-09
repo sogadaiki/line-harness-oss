@@ -10,6 +10,8 @@ import { processInterviewButchDetection } from './services/interview-followup.js
 import { refreshLineAccessTokens } from './services/token-refresh.js';
 import { processInsightFetch } from './services/insight-fetcher.js';
 import { authMiddleware } from './middleware/auth.js';
+import { accountScopeMiddleware } from './middleware/account-scope.js';
+import { accountStop } from './routes/account-stop.js';
 import { rateLimitMiddleware } from './middleware/rate-limit.js';
 import { webhook } from './routes/webhook.js';
 import { friends } from './routes/friends.js';
@@ -100,6 +102,15 @@ app.use('*', rateLimitMiddleware);
 
 // Auth middleware — skips /webhook and /docs automatically
 app.use('*', authMiddleware);
+app.use('*', accountScopeMiddleware);
+
+app.onError((err, c) => {
+  if ('status' in err && typeof err.status === 'number') {
+    return c.json({success:false,error:err.message}, err.status as 400);
+  }
+  console.error('Unhandled request error:', err);
+  return c.json({success:false,error:'Internal server error'},500);
+});
 
 // Mount route groups — MVP & Round 2
 app.route('/', webhook);
@@ -137,6 +148,7 @@ app.route('/', trafficPools);
 app.route('/', meetCallback);
 app.route('/', messageTemplates);
 app.route('/', authRoutes);
+app.route('/', accountStop);
 
 // Self-hosted QR code proxy — prevents leaking ref tokens to third-party services
 app.get('/api/qr', async (c) => {
@@ -255,19 +267,11 @@ async function scheduled(
   env: Env['Bindings'],
   _ctx: ExecutionContext,
 ): Promise<void> {
-  // Get all active accounts from DB, plus the default env account
-  const dbAccounts = await getLineAccounts(env.DB);
-  const activeTokens = new Set<string>();
-
-  // Default account from env
-  activeTokens.add(env.LINE_CHANNEL_ACCESS_TOKEN);
-
-  // DB accounts
-  for (const account of dbAccounts) {
-    if (account.is_active) {
-      activeTokens.add(account.channel_access_token);
-    }
-  }
+  const scope = env.SCOPED_LINE_ACCOUNT_ID;
+  const dbAccounts = (await getLineAccounts(env.DB)).filter(
+    account => account.is_active && (!scope || account.id === scope),
+  );
+  if (!dbAccounts.length) return;
 
   // Build LineClient map for insight fetching (keyed by account id)
   const lineClients = new Map<string, LineClient>();
@@ -276,24 +280,23 @@ async function scheduled(
       lineClients.set(account.id, new LineClient(account.channel_access_token));
     }
   }
-  const defaultLineClient = new LineClient(env.LINE_CHANNEL_ACCESS_TOKEN);
+  // Delivery services require a DB-owned account; this client is never a fallback.
+  const defaultLineClient = lineClients.get(dbAccounts[0].id)!;
 
   // Run delivery ONCE (not per-account) — each delivery function resolves
   // the correct LINE client internally via friend.line_account_id.
   // Running per-account caused N× duplicate sends (one per token).
   const jobs = [];
   jobs.push(
-    processStepDeliveries(env.DB, defaultLineClient, env.WORKER_URL),
-    processScheduledBroadcasts(env.DB, defaultLineClient, env.WORKER_URL),
-    processReminderDeliveries(env.DB, defaultLineClient),
+    processStepDeliveries(env.DB, defaultLineClient, env.WORKER_URL, scope),
+    processScheduledBroadcasts(env.DB, defaultLineClient, env.WORKER_URL, scope),
+    processReminderDeliveries(env.DB, defaultLineClient, scope),
   );
-  jobs.push(checkAccountHealth(env.DB));
-  jobs.push(refreshLineAccessTokens(env.DB));
+  jobs.push(checkAccountHealth(env.DB, scope));
+  jobs.push(refreshLineAccessTokens(env.DB, scope));
 
-  // 面談ブッチ検知（全アカウント共通・DB参照のみなのでtoken不要）
-  for (const token of activeTokens) {
-    jobs.push(processInterviewButchDetection(env.DB, token));
-    break; // ブッチ検知はDB操作のみ。1回で全アカウント処理
+  for (const account of dbAccounts) {
+    jobs.push(processInterviewButchDetection(env.DB, account.channel_access_token, account.id));
   }
 
   await Promise.allSettled(jobs);

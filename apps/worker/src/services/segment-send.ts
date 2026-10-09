@@ -11,6 +11,8 @@ import type { LineClient, Message } from '@line-crm/line-sdk';
 import { calculateStaggerDelay, sleep, addMessageVariation } from './stealth.js';
 import { buildSegmentQuery } from './segment-query.js';
 import type { SegmentCondition } from './segment-query.js';
+import { resolveDeliveryClient } from './line-client-resolver.js';
+import { claimBroadcast, assertBroadcastSending, finishBroadcast, failBroadcast } from './broadcast-state.js';
 
 const MULTICAST_BATCH_SIZE = 500;
 
@@ -25,22 +27,22 @@ export async function processSegmentSend(
   broadcastId: string,
   condition: SegmentCondition,
 ): Promise<Broadcast> {
-  // Mark as sending
-  await updateBroadcastStatus(db, broadcastId, 'sending');
-
   const broadcast = await getBroadcastById(db, broadcastId);
   if (!broadcast) {
     throw new Error(`Broadcast ${broadcastId} not found`);
   }
+  if (!broadcast.line_account_id) throw new Error('Broadcast account is required');
+  lineClient = await resolveDeliveryClient(db,broadcast.line_account_id);
 
   const message = buildMessage(broadcast.message_type, broadcast.message_content);
+  await claimBroadcast(db,broadcastId);
 
   let totalCount = 0;
   let successCount = 0;
 
   try {
     // Build and execute segment query to get matching friends
-    const { sql, bindings } = buildSegmentQuery(condition);
+    const { sql, bindings } = buildSegmentQuery(condition,broadcast.line_account_id);
     const queryResult = await db
       .prepare(sql)
       .bind(...bindings)
@@ -52,6 +54,7 @@ export async function processSegmentSend(
     const now = jstNow();
     const totalBatches = Math.ceil(friends.length / MULTICAST_BATCH_SIZE);
     const unit = `bcast_${broadcast.id.slice(0, 8)}`;
+    await updateBroadcastLineRequestId(db, broadcast.id, null, unit);
 
     for (let i = 0; i < friends.length; i += MULTICAST_BATCH_SIZE) {
       const batchIndex = Math.floor(i / MULTICAST_BATCH_SIZE);
@@ -71,6 +74,7 @@ export async function processSegmentSend(
       }
 
       try {
+        await assertBroadcastSending(db,broadcastId);
         await lineClient.multicast(lineUserIds, [batchMessage], [unit]);
         successCount += batch.length;
 
@@ -87,16 +91,15 @@ export async function processSegmentSend(
         }
       } catch (err) {
         console.error(`Segment multicast batch ${batchIndex} failed:`, err);
-        // Continue with next batch; failed batch is not logged
+        throw err;
       }
     }
 
     await updateBroadcastLineRequestId(db, broadcast.id, null, unit);
     await createBroadcastInsight(db, broadcast.id);
-    await updateBroadcastStatus(db, broadcastId, 'sent', { totalCount, successCount });
+    await finishBroadcast(db, broadcastId, totalCount, successCount);
   } catch (err) {
-    // On failure, reset to draft so it can be retried
-    await updateBroadcastStatus(db, broadcastId, 'draft');
+    await failBroadcast(db, broadcastId, totalCount, successCount);
     throw err;
   }
 

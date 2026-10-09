@@ -123,6 +123,7 @@ export async function getConversionEvents(
   db: D1Database,
   opts: {
     conversionPointId?: string;
+    lineAccountId?: string;
     friendId?: string;
     affiliateCode?: string;
     startDate?: string;
@@ -133,6 +134,10 @@ export async function getConversionEvents(
 ): Promise<ConversionEvent[]> {
   const conditions: string[] = [];
   const values: unknown[] = [];
+  if (opts.lineAccountId) {
+    conditions.push('friend_id IN (SELECT id FROM friends WHERE line_account_id=?) AND conversion_point_id IN (SELECT id FROM conversion_points WHERE line_account_id=?)');
+    values.push(opts.lineAccountId,opts.lineAccountId);
+  }
 
   if (opts.conversionPointId) {
     conditions.push('conversion_point_id = ?');
@@ -180,7 +185,7 @@ export interface ConversionReport {
 
 export async function getConversionReport(
   db: D1Database,
-  opts: { startDate?: string; endDate?: string } = {},
+  opts: { startDate?: string; endDate?: string; lineAccountId?: string } = {},
 ): Promise<ConversionReport[]> {
   const conditions: string[] = [];
   const values: unknown[] = [];
@@ -203,13 +208,14 @@ export async function getConversionReport(
          cp.name as conversion_point_name,
          cp.event_type,
          COUNT(ce.id) as total_count,
-         COALESCE(SUM(cp.value), 0) as total_value
+         COALESCE(SUM(CASE WHEN ce.id IS NOT NULL THEN cp.value ELSE 0 END), 0) as total_value
        FROM conversion_points cp
        LEFT JOIN conversion_events ce ON ce.conversion_point_id = cp.id ${conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : ''}
+       ${opts.lineAccountId ? 'AND ce.friend_id IN (SELECT id FROM friends WHERE line_account_id=?) WHERE cp.line_account_id=?' : ''}
        GROUP BY cp.id
        ORDER BY total_count DESC`,
     )
-    .bind(...values)
+    .bind(...values,...(opts.lineAccountId ? [opts.lineAccountId,opts.lineAccountId] : []))
     .all<{
       conversion_point_id: string;
       conversion_point_name: string;

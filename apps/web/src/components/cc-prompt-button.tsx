@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import PromptModal, { type PromptTemplate } from '@/components/prompt-modal'
+import { useAccount } from '@/contexts/account-context'
 
 interface CcPromptButtonProps {
   prompts: PromptTemplate[]
@@ -9,6 +10,8 @@ interface CcPromptButtonProps {
 
 export default function CcPromptButton({ prompts }: CcPromptButtonProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const { selectedAccount } = useAccount()
+  const scopedPrompts = prompts.map(p => ({ ...p, prompt: `対象LINE: ${selectedAccount?.name ?? '未選択'}\nline_account_id: ${selectedAccount?.id ?? '未選択'}\nこのLINEだけを対象にしてください。未選択の場合は作業を開始しないでください。他アカウントへの変更・送信は対象外です。\n\n${p.prompt}` }))
 
   return (
     <>
@@ -24,7 +27,7 @@ export default function CcPromptButton({ prompts }: CcPromptButtonProps) {
       <PromptModal
         isOpen={isOpen}
         onClose={() => setIsOpen(false)}
-        prompts={prompts}
+        prompts={scopedPrompts}
       />
     </>
   )

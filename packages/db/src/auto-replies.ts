@@ -22,7 +22,7 @@ export async function getAutoReplies(
 ): Promise<AutoReply[]> {
   if (lineAccountId) {
     const result = await db
-      .prepare(`SELECT * FROM auto_replies WHERE (line_account_id IS NULL OR line_account_id = ?) ORDER BY created_at DESC`)
+      .prepare(`SELECT * FROM auto_replies WHERE line_account_id = ? ORDER BY created_at DESC`)
       .bind(lineAccountId)
       .all<AutoReply>();
     return result.results;
@@ -49,6 +49,7 @@ export interface CreateAutoReplyInput {
   responseType?: string;
   responseContent: string;
   lineAccountId?: string | null;
+  isActive?: boolean;
 }
 
 export async function createAutoReply(
@@ -63,7 +64,7 @@ export async function createAutoReply(
       `INSERT INTO auto_replies
          (id, keyword, match_type, response_type, response_content,
           line_account_id, is_active, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       id,
@@ -72,6 +73,7 @@ export async function createAutoReply(
       input.responseType ?? 'text',
       input.responseContent,
       input.lineAccountId ?? null,
+      input.isActive ? 1 : 0,
       now,
     )
     .run();

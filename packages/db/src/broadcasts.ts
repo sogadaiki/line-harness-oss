@@ -5,6 +5,7 @@ export type BroadcastMessageType = 'text' | 'image' | 'flex';
 
 export interface Broadcast {
   id: string;
+  line_account_id: string | null;
   title: string;
   message_type: BroadcastMessageType;
   message_content: string;
@@ -63,6 +64,7 @@ export interface CreateBroadcastInput {
   targetType: BroadcastTargetType;
   targetTagId?: string | null;
   scheduledAt?: string | null;
+  lineAccountId?: string | null;
 }
 
 export async function createBroadcast(
@@ -77,8 +79,8 @@ export async function createBroadcast(
   await db
     .prepare(
       `INSERT INTO broadcasts
-         (id, title, message_type, message_content, target_type, target_tag_id, status, scheduled_at, sent_at, total_count, success_count, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, ?)`,
+         (id, title, message_type, message_content, target_type, target_tag_id, status, scheduled_at, line_account_id, sent_at, total_count, success_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 0, ?)`,
     )
     .bind(
       id,
@@ -89,6 +91,7 @@ export async function createBroadcast(
       input.targetTagId ?? null,
       initialStatus,
       input.scheduledAt ?? null,
+      input.lineAccountId ?? null,
       now,
     )
     .run();

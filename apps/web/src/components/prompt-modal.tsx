@@ -118,7 +118,7 @@ export default function PromptModal({ isOpen, onClose, prompts }: PromptModalPro
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-gray-200">
-          <p className="text-xs text-gray-400">Claude Code にプロンプトを貼り付けて使用してください</p>
+          <p className="text-xs text-gray-400">コピーのみで、処理は実行されません。対象LINEを確認してから使用してください。</p>
         </div>
       </div>
     </div>

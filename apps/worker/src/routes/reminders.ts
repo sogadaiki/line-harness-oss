@@ -86,12 +86,7 @@ reminders.post('/api/reminders', async (c) => {
   try {
     const body = await c.req.json<{ name: string; description?: string; lineAccountId?: string | null }>();
     if (!body.name) return c.json({ success: false, error: 'name is required' }, 400);
-    const item = await createReminder(c.env.DB, body);
-    // Save line_account_id if provided
-    if (body.lineAccountId) {
-      await c.env.DB.prepare(`UPDATE reminders SET line_account_id = ? WHERE id = ?`)
-        .bind(body.lineAccountId, item.id).run();
-    }
+    const item = await createReminder(c.env.DB, {...body,lineAccountId:getScope(c)});
     return c.json({ success: true, data: { id: item.id, name: item.name, createdAt: item.created_at } }, 201);
   } catch (err) {
     console.error('POST /api/reminders error:', err);

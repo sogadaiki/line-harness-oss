@@ -8,7 +8,8 @@ export interface SegmentCondition {
   rules: SegmentRule[]
 }
 
-export function buildSegmentQuery(condition: SegmentCondition): { sql: string; bindings: unknown[] } {
+export function buildSegmentQuery(condition: SegmentCondition, accountId: string): { sql: string; bindings: unknown[] } {
+  if (!accountId || !['AND','OR'].includes(condition.operator) || !Array.isArray(condition.rules)) throw new Error('Valid segment and account are required');
   const bindings: unknown[] = []
   const clauses: string[] = []
 
@@ -93,7 +94,8 @@ export function buildSegmentQuery(condition: SegmentCondition): { sql: string; b
 
   const separator = condition.operator === 'AND' ? ' AND ' : ' OR '
   const where = clauses.length > 0 ? clauses.join(separator) : '1=1'
-  const sql = `SELECT f.id, f.line_user_id FROM friends f WHERE ${where}`
+  const sql = `SELECT f.id, f.line_user_id FROM friends f WHERE (${where}) AND f.line_account_id = ? AND f.is_following = 1`
+  bindings.push(accountId)
 
   return { sql, bindings }
 }

@@ -92,12 +92,7 @@ function AccountSwitcher() {
 
   if (loading || accounts.length === 0) return null
 
-  // Single-account mode: tenant-scoped worker returns exactly one account.
-  // Render as a static label (no dropdown) to remove every UI affordance for
-  // switching accounts. This is the cross-tenant isolation hardlock at the UI
-  // layer — even if a future API regression returned multiple accounts, the
-  // server-side scope guard already prevents data leak; this just removes the
-  // accident motive.
+  // One visible account may come from a UI filter. Authorization remains server-side.
   if (accounts.length === 1) {
     const only = accounts[0]
     const onlyName = only.displayName || only.name
@@ -107,7 +102,7 @@ function AccountSwitcher() {
           <AccountAvatar account={only} size={28} />
           <div className="flex-1 text-left min-w-0">
             <p className="text-sm font-medium text-gray-900 truncate">{onlyName}</p>
-            <p className="text-[10px] text-gray-400 truncate">このログインで操作できる唯一のアカウント</p>
+            <p className="text-[10px] text-gray-400 truncate">この管理画面の表示対象</p>
           </div>
         </div>
       </div>

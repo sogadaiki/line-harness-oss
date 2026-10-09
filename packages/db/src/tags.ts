@@ -64,6 +64,7 @@ export async function addTagToFriend(
   friendId: string,
   tagId: string,
 ): Promise<void> {
+  await assertTagOwner(db, friendId, tagId);
   const now = jstNow();
   await db
     .prepare(
@@ -79,12 +80,20 @@ export async function removeTagFromFriend(
   friendId: string,
   tagId: string,
 ): Promise<void> {
+  await assertTagOwner(db, friendId, tagId);
   await db
     .prepare(
       `DELETE FROM friend_tags WHERE friend_id = ? AND tag_id = ?`,
     )
     .bind(friendId, tagId)
     .run();
+}
+
+async function assertTagOwner(db: D1Database, friendId: string, tagId: string): Promise<void> {
+  const match = await db.prepare(`SELECT f.id FROM friends f JOIN tags t ON t.id=?
+    WHERE f.id=? AND f.line_account_id IS NOT NULL AND t.line_account_id=f.line_account_id`)
+    .bind(tagId, friendId).first();
+  if (!match) throw new Error('Friend and tag must belong to the same account');
 }
 
 export async function getFriendTags(
@@ -96,7 +105,8 @@ export async function getFriendTags(
       `SELECT t.*
        FROM tags t
        INNER JOIN friend_tags ft ON ft.tag_id = t.id
-       WHERE ft.friend_id = ?
+       INNER JOIN friends f ON f.id=ft.friend_id
+       WHERE ft.friend_id = ? AND t.line_account_id=f.line_account_id
        ORDER BY t.name ASC`,
     )
     .bind(friendId)

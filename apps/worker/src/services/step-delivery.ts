@@ -6,10 +6,12 @@ import {
   completeFriendScenario,
   getFriendById,
   jstNow,
+  isScenarioDeliveryAllowed,
 } from '@line-crm/db';
 import type { LineClient } from '@line-crm/line-sdk';
 import type { Message } from '@line-crm/line-sdk';
 import { jitterDeliveryTime, addJitter, sleep } from './stealth.js';
+import { resolveDeliveryClient } from './line-client-resolver.js';
 
 /**
  * Replace template variables in message content.
@@ -68,19 +70,12 @@ export function expandVariables(
 }
 
 /**
- * Resolve metadata for a friend, merging across all UUID-linked records.
- * Falls back to the friend's own metadata if no user_id.
+ * Use this account's record only. A shared UUID does not authorize sharing answers.
  */
 export async function resolveMetadata(
   db: D1Database,
   friend: { user_id?: string | null; metadata?: string | null },
 ): Promise<Record<string, unknown>> {
-  // If friend has a UUID, merge metadata from all linked records
-  if (friend.user_id) {
-    const { getMergedMetadataByUserId } = await import('@line-crm/db');
-    return getMergedMetadataByUserId(db, friend.user_id);
-  }
-  // Fallback: parse own metadata
   if (friend.metadata) {
     try { return JSON.parse(friend.metadata); } catch { return {}; }
   }
@@ -112,13 +107,14 @@ export async function processStepDeliveries(
   db: D1Database,
   lineClient: LineClient,
   workerUrl?: string,
+  accountScope?: string,
 ): Promise<void> {
   // Skip delivery outside 9:00-23:00 JST window
   const jstHour = new Date(Date.now() + 9 * 60 * 60_000).getUTCHours();
   if (jstHour < DEFAULT_START_HOUR || jstHour >= DEFAULT_END_HOUR) return;
 
   const now = jstNow();
-  const dueFriendScenarios = await getFriendScenariosDueForDelivery(db, now);
+  const dueFriendScenarios = await getFriendScenariosDueForDelivery(db, now,accountScope);
 
   for (let i = 0; i < dueFriendScenarios.length; i++) {
     const fs = dueFriendScenarios[i];
@@ -151,6 +147,7 @@ async function processSingleDelivery(
   // Dedup is handled AFTER message build, right before pushMessage,
   // via UNIQUE index on messages_log (friend_id, scenario_step_id).
   // No optimistic lock needed here — the UNIQUE INSERT is the gate.
+  if (!await isScenarioDeliveryAllowed(db,fs.id)) return;
 
   // Get friend first to read preferred delivery hour from metadata
   const friend = await getFriendById(db, fs.friend_id);
@@ -216,22 +213,13 @@ async function processSingleDelivery(
   let trackedContent = expandedContent;
   if (workerUrl) {
     const { autoTrackContent } = await import('./auto-track.js');
-    const tracked = await autoTrackContent(db, currentStep.message_type, expandedContent, workerUrl);
+    const tracked = await autoTrackContent(db, currentStep.message_type, expandedContent, workerUrl, friend.line_account_id!);
     trackedType = tracked.messageType;
     trackedContent = tracked.content;
   }
   const message = buildMessage(trackedType, trackedContent);
   // Resolve the correct LINE client for this friend's account
-  let deliveryClient = lineClient;
-  const friendAccountId = (friend as unknown as Record<string, string | null>).line_account_id;
-  if (friendAccountId) {
-    const { getLineAccountById } = await import('@line-crm/db');
-    const account = await getLineAccountById(db, friendAccountId);
-    if (account) {
-      const { LineClient: LC } = await import('@line-crm/line-sdk');
-      deliveryClient = new LC(account.channel_access_token);
-    }
-  }
+  const deliveryClient = await resolveDeliveryClient(db,friend.line_account_id);
   // Dedup guard: two-phase approach for parallel Worker safety.
   // Phase 1: Pre-check — if already sent, skip entirely (fast path for most cases).
   // Phase 2: Atomic INSERT with RETURNING — only the first INSERT returns a row.
@@ -255,6 +243,10 @@ async function processSingleDelivery(
 
   // LINE API 失敗時はログを削除して次の cron で再試行可能にする (外部境界なので try/catch 許可)
   try {
+    if (!await isScenarioDeliveryAllowed(db,fs.id)) {
+      await db.prepare('DELETE FROM messages_log WHERE id=?').bind(insertResult.id).run();
+      return;
+    }
     await deliveryClient.pushMessage(friend.line_user_id, [message]);
   } catch (err) {
     await db.prepare(`DELETE FROM messages_log WHERE id = ?`).bind(insertResult.id).run();
@@ -283,7 +275,8 @@ async function evaluateCondition(
   friendId: string,
   step: { condition_type: string | null; condition_value: string | null },
 ): Promise<boolean> {
-  if (!step.condition_type || !step.condition_value) return true;
+  if (!step.condition_type) return true;
+  if (!step.condition_value) return false;
 
   switch (step.condition_type) {
     case 'tag_exists': {
@@ -319,7 +312,7 @@ async function evaluateCondition(
       return metadata[key] !== value;
     }
     default:
-      return true;
+      return false;
   }
 }
 

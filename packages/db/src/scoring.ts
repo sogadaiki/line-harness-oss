@@ -108,7 +108,9 @@ export async function getActiveRulesByEvent(db: D1Database, eventType: string): 
 
 /** イベント発生時にスコアリングルールを適用 */
 export async function applyScoring(db: D1Database, friendId: string, eventType: string): Promise<number> {
-  const rules = await getActiveRulesByEvent(db, eventType);
+  const friend = await db.prepare('SELECT line_account_id FROM friends WHERE id=?').bind(friendId).first<{line_account_id:string|null}>();
+  if (!friend?.line_account_id) return 0;
+  const rules = (await getActiveRulesByEvent(db, eventType)).filter(r=>r.line_account_id === friend.line_account_id);
   let totalChange = 0;
   for (const rule of rules) {
     await addScore(db, {
