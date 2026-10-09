@@ -1,0 +1,323 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>LINE Harness 操作ガイド</title><style>
+:root{color-scheme:light;--ink:#24313d;--accent:#315c86}*{box-sizing:border-box}body{margin:0;background:#f5f5f2;color:var(--ink);font:16px/1.85 -apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN",sans-serif}a{color:var(--accent);text-underline-offset:3px}header{padding:28px 36px;background:#24394d;color:white}header p{margin:6px 0 0;color:#dce4ec}h1{font-size:28px;margin:0;line-height:1.5}.layout{display:grid;grid-template-columns:260px minmax(0,960px);max-width:1260px;margin:auto;gap:28px;padding:28px}nav{position:sticky;top:16px;align-self:start;max-height:calc(100vh - 32px);overflow:auto;padding:8px 0}nav a{display:block;color:#435567;text-decoration:none;font-size:13px;padding:7px 10px;border-left:2px solid transparent}nav a:hover{border-color:#315c86;background:#e8eef3}.chapter{font-weight:700;margin:10px 0;font-size:16px}main{min-width:0}section{background:white;border:1px solid #dde2e6;border-radius:8px;padding:28px 36px;margin-bottom:28px}h2{font-size:24px;margin-top:0}h3{font-size:21px;border-top:1px solid #e1e6ea;padding-top:26px;margin-top:38px;scroll-margin-top:18px}h4{font-size:18px;margin:24px 0 12px}p{margin:12px 0}strong{color:#812c41}code{background:#f0f3f6;border-radius:4px;padding:2px 4px;font:13px/1.6 ui-monospace,monospace;overflow-wrap:anywhere}pre{overflow:auto;background:#f0f3f6;padding:18px;border-radius:6px}pre code{padding:0}.table-wrap{overflow-x:auto;margin:20px 0}table{border-collapse:collapse;font-size:14px;width:100%;min-width:560px}th,td{padding:11px 12px;vertical-align:top;text-align:left;border:1px solid #dce2e7}th{background:#eef2f5}img{max-width:100%;height:auto;border:1px solid #dce2e7;border-radius:6px}li{padding:3px 0}footer{padding:24px;font-size:13px;color:#607080;text-align:center}a:focus-visible{outline:3px solid #9ab9d6;outline-offset:3px}@media(max-width:900px){.layout{display:block;padding:16px}nav{position:static;max-height:none;display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px}nav a:not(.chapter){display:none}section{padding:22px 20px}header{padding:22px}h1{font-size:23px}h2{font-size:21px}h3{font-size:19px}}@media print{nav,header,footer{display:none}.layout{display:block;padding:0}section{border:0;padding:0;break-after:page}a{color:inherit}h3{break-after:avoid}.table-wrap{overflow:visible}table{min-width:0}img{max-height:350px;object-fit:contain}}
+</style></head><body><header><h1>LINE Harness 操作ガイド</h1><p>個別相談・診断連携・配信設定・停止の使い方と、運用前に直す問題</p></header><div class="layout"><nav aria-label="目次"><a class="chapter" href="#guide">操作ガイド</a>
+<a href="#guide-1">1. 運用開始前の判断</a>
+<a href="#guide-3">2. 三つの画面の役割</a>
+<a href="#guide-4">3. ログインと対象確認</a>
+<a href="#guide-5">4. 日々の個別相談</a>
+<a href="#guide-9">5. タグで相談者を整理する</a>
+<a href="#guide-10">6. 自動処理の違い</a>
+<a href="#guide-11">7. 診断結果をLINEにつなぐ設計</a>
+<a href="#guide-12">8. キーワード応答の設定担当向け</a>
+<a href="#guide-13">9. シナリオを編集する</a>
+<a href="#guide-14">10. オートメーションを設定する</a>
+<a href="#guide-15">11. 一斉配信の下書きと予約</a>
+<a href="#guide-16">12. 画像・カード・テンプレート</a>
+<a href="#guide-17">13. 面談とリマインダ</a>
+<a href="#guide-18">14. 通知とWebhook</a>
+<a href="#guide-19">15. 指標を読む</a>
+<a href="#guide-20">16. 全管理メニューの対応表</a>
+<a href="#guide-21">17. 「CCに依頼」は実行ボタンではない</a>
+<a href="#guide-22">18. 止め方と復旧</a>
+<a href="#guide-23">19. 困ったときの対応</a>
+<a href="#guide-24">20. 運用を始める条件</a>
+<a class="chapter" href="#audit">問題と修正確認</a>
+<a class="chapter" href="#practice">練習環境</a></nav><main><section id="guide" aria-label="操作ガイド"><h2 id="guide-0">LINE Harness 操作ガイド</h2>
+<p>対象は、店舗で個別相談を受ける担当者と、診断・配信を設定する運用担当者です。初めに「対象確認」、日常業務では「個別相談」、設定変更では「自動処理」を参照してください。</p>
+<h3 id="guide-1">1. 運用開始前の判断</h3>
+<p><strong>現在の版では、アカウントの表示・保存・停止が一貫していません。複数アカウントが登録された管理画面で、そのまま配信を増やす運用は避けます。</strong> 左上の名前が合っているだけでは、保存先・送信先・停止対象を保証できません。</p>
+<p>使い方の習得と、本番で安全に配信できる状態は分けて判断します。個別対応の手順は練習できますが、新規自動化と配信の有効化には、<a href="#audit">アカウント分離と停止の修正</a>が必要です。</p>
+<h4 id="guide-2">確認範囲</h4>
+<p>2026年10月9日に、稼働中のアカウント一覧を読み取り確認し、ローカルのソース <code>dba7acd94d3ffcfbe398fcfbaef147da6d1bd356</code> と照合しました。架空データを使い、実際の管理画面コードで代表操作を練習しています。稼働中バックエンドの配布版がこのソースと完全一致するか、実機でのLINE受信が成立するかは、この確認に含みません。</p>
+<p>このガイドの画像はすべて架空の練習環境です。実利用者のトーク、認証情報、顧客データを含みません。</p>
+<h3 id="guide-3">2. 三つの画面の役割</h3>
+<div class="table-wrap"><table><thead><tr><th>画面</th><th>管理するもの</th><th>他の画面との関係</th></tr></thead><tbody>
+<tr><td>LINE Official Account Manager</td><td>公式アカウントのプロフィール、ネイティブの応答メッセージ・カード・リッチメニュー・チャット</td><td>Harnessへの登録だけで内容が複製・同期されるわけではありません</td></tr>
+<tr><td>LINE Developers</td><td>Messaging API、Webhook、LINE Loginなどの接続設定</td><td>Harnessへイベントを渡し、ログインを成立させるための設定です</td></tr>
+<tr><td>LINE Harness</td><td>独自の友だち台帳、トーク履歴、タグ、シナリオ、配信、ルール</td><td>接続後に受け取ったイベントを基に管理します。アカウント一覧の「有効」は受信・送信成功の証明ではありません</td></tr>
+</tbody></table></div>
+<p>既存アカウントの過去トークや友だちが、Harnessに全部取り込まれているとは限りません。「Harnessの友だち数」と「公式LINEの友だち数」は集計範囲を確かめて比較します。</p>
+<h3 id="guide-4">3. ログインと対象確認</h3>
+<p>通常は管理画面の「LINEでログイン」を使います。スタッフは、管理者が用意した本人用のログイン導線を使います。「APIキーでログイン」は管理者が扱う代替経路であり、LINE公式アカウントのChannel Access Tokenを入れる欄ではありません。</p>
+<ol>
+<li>管理画面のURLを確認する。本番と練習環境を区別する。</li>
+<li>左上のアカウント名を読む。複数選択できる構成では、名前を押して対象を選ぶ。</li>
+<li>「LINEアカウント」画面の登録一覧と、左上の操作対象を区別する。</li>
+<li>希望するアカウントを選べない場合は、別アカウントのまま操作せず、管理者に画面の対象設定を確認してもらう。</li>
+</ol>
+<p>「このログインで操作できる唯一のアカウント」は、現在のコードではフロントエンドの表示用許可リストでも出ます。サーバー側のアクセス制限が検証済み、という意味には使えません。</p>
+<p>アカウント一覧の「有効」を押すと登録の有効・無効が変わります。「削除」は登録を削除します。どちらも、日々のアカウント選択用ボタンではありません。</p>
+<h3 id="guide-5">4. 日々の個別相談</h3>
+<h4 id="guide-6">未読から対応中へ</h4>
+<ol>
+<li>「個別チャット」を開き、「未読」で絞り込む。</li>
+<li>対象者の行を押し、名前と本文を確認する。</li>
+<li>「対応中にする」を押す。誰が次の対応を行うか、メモに残す。</li>
+<li>返信欄へ入力し、宛先・文章を確認する。</li>
+<li>「送信」を押す。現在の画面はEnterでも送信するため、入力確定時に注意する。</li>
+<li>自分の返信が履歴へ表示されたか確認する。LINE側での受信確認が必要なテストでは、本人の端末でも確認する。</li>
+</ol>
+<p>チャットを開いただけでは自動的に「対応中」へ変わりません。履歴への表示と、利用者がメッセージを読んだことも別です。</p>
+<h4 id="guide-7">店舗スタッフへの引継ぎ</h4>
+<p>「メモを入力...」に、担当、次の対応、候補日時、回答待ちかどうかを記入して「メモ保存」を押します。メモ保存はLINEへ送る操作ではありません。不要な個人情報は書かず、業務に必要な範囲だけ残します。</p>
+<p>面談日時が確定し、案内が済んだら「解決済にする」を押します。この状態変更は「面談実施」「採用」「自動追客の停止」を意味しません。面談申込・日時確定・来店・採用は別々に管理します。</p>
+<h4 id="guide-8">入力中ローディング</h4>
+<p>「入力中ローディングを表示」は、入力時にLINE側へローディング表示を要求する設定です。AIが相談文を読んだり、返信を考えたりする機能ではありません。テストではOFFのままにし、実運用で使う場合は表示開始だけでも外部APIへの操作になることを理解します。</p>
+<p><img loading="lazy" src="images/practice-chat.jpg" alt="架空ユーザーへの対応中・返信・メモ"></p>
+<h3 id="guide-9">5. タグで相談者を整理する</h3>
+<ol>
+<li>「友だち管理」で対象者の行を押す。行が展開して「タグ管理」が出る。</li>
+<li>「タグを追加」を押し、既存タグを選び「追加」を押す。</li>
+<li>行にタグが出ることを確認する。</li>
+<li>上部の「タグで絞り込み」で対象タグを選ぶ。</li>
+</ol>
+<p>タグは「診断タイプ」「面談希望」「日程確定」などの分類に使えます。LINE公式側のラベルとHarnessのタグは別管理です。</p>
+<p><strong>タグ付与は分類だけとは限りません。</strong> 現在のコードはタグ付与でシナリオや自動化を起動できます。実利用者へ付ける前に、どのルールが動くかを確認します。タグ作成専用の管理ページは現在ありません。</p>
+<h3 id="guide-10">6. 自動処理の違い</h3>
+<div class="table-wrap"><table><thead><tr><th>機能</th><th>きっかけ</th><th>用途</th><th>操作場所</th></tr></thead><tbody>
+<tr><td>キーワード自動応答</td><td>利用者のメッセージ、カードのpostback</td><td>診断結果、質問への返答</td><td>APIで設定。専用編集ページなし</td></tr>
+<tr><td>シナリオ配信</td><td>友だち追加、タグ付与、手動登録</td><td>登録後に順番に案内</td><td>「シナリオ配信」＋登録・停止のAPI</td></tr>
+<tr><td>オートメーション</td><td>受信、タグ変更、予約などのイベント</td><td>タグ付与、シナリオ開始・停止、メッセージなど</td><td>「オートメーション」。条件・動作はJSON</td></tr>
+<tr><td>リマインダ</td><td>特定の日時</td><td>面談前日・直前の案内</td><td>「リマインダ」で定義、個人と基準日時の登録はAPI</td></tr>
+<tr><td>一斉配信</td><td>運用担当者が作成した配信</td><td>全員・指定タグへの告知</td><td>「一斉配信」</td></tr>
+</tbody></table></div>
+<p>複数の機能を同じ出来事に重ねると、重複案内が起きます。「いつ」「誰へ」「どれが送る」「何で止まる」を各メッセージに一つずつ決めます。</p>
+<h3 id="guide-11">7. 診断結果をLINEにつなぐ設計</h3>
+<p>想定する流れは「LPで回答 → 本人との対応付け → 友だち追加確認 → 画像と解説 → 面談相談 → 店舗スタッフ」です。</p>
+<p>友だち追加リンクを開くだけでは、LPの回答内容がHarnessへ渡りません。トークへ文章を入れるリンクでも、利用者が送信して初めて受信イベントになります。利用者の送信操作を省くには、LINE Loginなどで本人と診断結果を対応付け、友だち状態を確認してサーバーから送る接続が必要です。Harnessのアカウント登録だけでは、この接続は完成しません。</p>
+<p>画像と解説を同時に返す場合、キーワード応答のコードは複数のLINEメッセージを配列で扱えます。Flexカードのpostbackも扱えますが、通常のテキスト受信とpostbackで処理経路が違うため、それぞれ端末で確認します。</p>
+<p>LPの見え方、診断結果保存、友だち追加、画像受信、解説受信、相談申込、スタッフ確認の七つを分けて確認します。既存の友だちで成功しても、新規追加時の経路は別に試します。</p>
+<h3 id="guide-12">8. キーワード応答の設定担当向け</h3>
+<p>APIは <code>/api/auto-replies</code> です。主な項目は <code>keyword</code>、<code>matchType</code>、<code>responseType</code>、<code>responseContent</code>、<code>lineAccountId</code>、<code>isActive</code> です。認証情報はガイドへ貼り付けず、承認済みの安全な保管先から使います。</p>
+<ul>
+<li><code>exact</code> は完全一致、<code>contains</code> は部分一致です。</li>
+<li>現在のコードは作成日時が古い順に調べ、最初に一致した一つで打ち切ります。完全一致を自動的に優先する仕組みではありません。</li>
+<li>所属アカウント未指定のルールは、グローバルな応答候補になります。</li>
+<li>応答後にメッセージ受信イベントの自動化も走り得ます。自動応答と自動化の重複を確認します。</li>
+<li>「公式LINEの応答メッセージ」に作ったものと、このAPIのルールは別物です。</li>
+</ul>
+<p>専用のGUIがないため、店舗スタッフが結果画像や応答条件をここで安全に編集できる状態にはなっていません。設定担当者が対象アカウントを限定して扱います。</p>
+<h3 id="guide-13">9. シナリオを編集する</h3>
+<p>練習環境での操作は次のとおりです。本番の新規作成は、保存時の所属アカウント欠落を修正してから行います。</p>
+<ol>
+<li>「シナリオ配信」から名前または「編集」を押す。</li>
+<li>「+ ステップ追加」を押す。</li>
+<li>「ステップ順序」「遅延 (分)」「メッセージタイプ」「メッセージ内容」を入力する。</li>
+<li>「追加」を押し、ステップ一覧へ表示されることを確認する。</li>
+</ol>
+<p>1日は1440分、1時間は60分です。遅延は前のステップからの待機時間として扱われます。初回は登録時点からです。「即時」「1日後」の表示は設定値であり、端末へその時刻に届く保証ではありません。</p>
+<p>初回の友だち追加処理には直接返信する経路がありますが、後続ステップは定期処理に依存します。参照した設定ファイルはUTC 0時・12時、JST 9時・21時の実行です。分単位の間隔を期待する場合は、実際の稼働中スケジュールも確認します。夜間の配信制限や揺らぎもコードにあります。</p>
+<p>新規作成画面は「友だち追加時」「作成後すぐに有効にする」が初期値です。内容が空のまま本番で起動しないよう、完成・確認前は有効にしません。</p>
+<p>「無効」と「その人への配信停止」は別です。現在の配信処理は、個人の登録状態を見て後続ステップを処理します。親シナリオの無効化だけを停止完了と扱いません。</p>
+<p><img loading="lazy" src="images/practice-scenario.jpg" alt="無効の練習シナリオへ翌日ステップを追加"></p>
+<h3 id="guide-14">10. オートメーションを設定する</h3>
+<p>「+ 新規ルール」で、ルール名、イベントタイプ、アクション、条件、優先度を入力します。現在はJSONを直接編集する画面です。</p>
+<p><strong>条件欄の入力例に不一致があります。</strong> 画面は <code>tagId</code> と <code>operator</code> を例示しますが、現在の判定関数が見るキーは <code>tag_id</code>、<code>keyword</code>、<code>score_threshold</code> です。画面の例をそのまま使うと、意図したタグ制限が効かないことを実際の関数で確認しています。未対応キーも拒否されません。</p>
+<p>空の条件 <code>{}</code> は、そのイベントで常に一致します。条件JSONが構文的に正しいことと、意図どおりに対象を限定できることは別です。条件とアクションの設定は、対象外の人・別アカウントで発火しないテストまで行います。</p>
+<p>アクションの <code>pause_scenario</code> は個人のシナリオ登録を止める処理です。<code>complete_scenario</code> は完了扱いです。チャットを「解決済」に変えるだけでは、これらは実行されません。</p>
+<p><img loading="lazy" src="images/practice-automation.jpg" alt="条件とアクションにJSONを使う現在の画面"></p>
+<h3 id="guide-15">11. 一斉配信の下書きと予約</h3>
+<ol>
+<li>「一斉配信」→「+ 新規配信」。</li>
+<li>タイトル、メッセージ種別、内容、配信対象を入力する。</li>
+<li>保存だけなら「下書きとして保存」を選んで「作成」。</li>
+<li>「予約配信」を選び日時を入れて「作成」すると、バックエンドは予約済みとして扱う。</li>
+<li>下書きの「送信」は即時送信の操作。保存と区別する。</li>
+</ol>
+<p>予約は、あとで別の有効化操作をする前提ではありません。日時を入れて保存した時点で、定期処理の対象になり得ます。</p>
+<p>現在のGUIは配信作成時に所属アカウントを送らず、選択アカウントで絞った一覧から保存物が消える現象を練習環境で再現しました。また、タグ指定の送信処理には複数アカウントを横断する経路があります。修正前の本番作成・送信は避けます。</p>
+<p>全員配信の実績「0」は、コードでは送信人数が不明な場合にも保存されます。ゼロ人に配信した証拠にせず、LINEの送信結果と後から取得する実績を確認します。</p>
+<h3 id="guide-16">12. 画像・カード・テンプレート</h3>
+<p>画像は公開されたHTTPSの元画像URL・プレビュー画像URLを使う構成です。一斉配信にはURL補助欄がありますが、シナリオ詳細はJSON入力欄です。ローカルPCの画像パスを入れても配信画像にはなりません。</p>
+<p>Flexはカードの見た目を記述するJSONです。Harnessで扱うFlexと、公式LINEのカードタイプメッセージは保存形式が違います。公式画面のカードが自動的にFlexへ変換されるとは扱いません。</p>
+<p>「テンプレート」は名前・カテゴリ・種別・内容の保管機能です。保存しただけでは送信・応答は始まりません。現在の個別チャット画面にはテンプレート選択による挿入操作がないため、必要な文を確認して返信欄へ入れます。</p>
+<h3 id="guide-17">13. 面談とリマインダ</h3>
+<p>面談申込の受信後は、店舗スタッフが候補日時を確認し、合意した日時を記録します。「面談希望」と「日時確定」は分けます。</p>
+<p>「リマインダ」では定義とステップを編集できますが、対象者と基準日時の登録・取消はAPI側の機能です。定義を作るだけでは個人の面談前通知は予約されません。Google Calendar連携にもAPIがありますが、現在の管理メニューに予約カレンダーの専用画面はありません。</p>
+<p>前日と直前の通知は、定期実行の頻度が目的に合うか確認します。面談取消時には、個人のリマインダ登録も取り消します。</p>
+<h3 id="guide-18">14. 通知とWebhook</h3>
+<p>「Webhook」画面は、外部システムとの受信・送信連携を管理する画面です。LINE Developersに入れるMessaging APIのWebhook URLそのものの設定画面ではありません。</p>
+<p>「通知」にはルールと通知履歴があります。コード上、dashboard通知はDB記録、emailは送信処理未実装です。通知欄に記録があることと、スタッフのスマホへ通知が届くことを区別します。外部への通知は、送信Webhookなどの接続と受信確認が別途必要です。</p>
+<h3 id="guide-19">15. 指標を読む</h3>
+<div class="table-wrap"><table><thead><tr><th>表示・指標</th><th>読み方</th></tr></thead><tbody>
+<tr><td>友だち数</td><td>Harnessが把握する範囲。LINE公式の総数と一致するとは限らない</td></tr>
+<tr><td>配信中</td><td>シナリオ登録状態の集計。実際の受信・有人チャット対応数ではない</td></tr>
+<tr><td>今月送信</td><td>アカウント画面のコードは直近30日・push相当のログを集計。暦月や無料replyを含む全送信数ではない</td></tr>
+<tr><td>ダッシュボードのルール・配信数</td><td>一部は選択アカウントを指定せず取得するため、他アカウント分を含む可能性がある</td></tr>
+<tr><td>送信済み</td><td>処理側の状態。全員の端末受信・既読・面談成立を保証しない</td></tr>
+<tr><td>フォーム回答</td><td>回答データ。友だち追加や面談成立を自動的に意味しない</td></tr>
+<tr><td>CV計測</td><td>登録したCVイベント。面談申込・確定・来店を別イベントとして定義する</td></tr>
+<tr><td>BAN検知</td><td>APIエラーなどの記録による判断支援。広告・アカウントの安全を保証する表示ではない</td></tr>
+</tbody></table></div>
+<p>広告クリック、LP診断完了、LINEボタン押下、新規友だち追加、結果受信、面談希望、日時確定、来店を別指標にします。</p>
+<h3 id="guide-20">16. 全管理メニューの対応表</h3>
+<div class="table-wrap"><table><thead><tr><th>メニュー</th><th>主な使い道</th><th>現在の注意点</th></tr></thead><tbody>
+<tr><td>ダッシュボード</td><td>概況・各ページへの移動</td><td>指標のアカウント指定が一部不足</td></tr>
+<tr><td>友だち管理</td><td>一覧、既存タグの付与・解除、タグ絞り込み</td><td>タグ付与で自動処理が始まる場合がある</td></tr>
+<tr><td>個別チャット</td><td>返信、未読・対応中・解決済、メモ</td><td>自動追客停止・予約確定は別処理</td></tr>
+<tr><td>シナリオ配信</td><td>定義と順番・間隔の編集</td><td>保存先欠落、親無効化と個人停止の違い</td></tr>
+<tr><td>一斉配信</td><td>下書き、予約、全員・タグ送信</td><td>保存先欠落、タグ送信の横断範囲</td></tr>
+<tr><td>テンプレート</td><td>内容の保管とカテゴリ分類</td><td>保存だけでは送られない。一覧は共通</td></tr>
+<tr><td>リマインダ</td><td>基準日時前後の通知定義</td><td>個人への登録・取消はAPI。保存先にも欠落</td></tr>
+<tr><td>流入経路</td><td>紹介・流入の定義と実績</td><td>LPの広告パラメータと自動連動するとは限らない</td></tr>
+<tr><td>CV計測</td><td>CVポイントとイベントの実績</td><td>意味・発火条件を先に定義</td></tr>
+<tr><td>スコアリング</td><td>イベントによる点数ルール</td><td>適性・採用判断の自動確定には使わない</td></tr>
+<tr><td>フォーム回答</td><td>定義済みフォームの回答参照</td><td>作成画面はない。画面のアカウント変更だけでは取得先を限定しない</td></tr>
+<tr><td>オートメーション</td><td>イベント条件と動作</td><td>JSON入力、条件例不一致、保存先欠落</td></tr>
+<tr><td>Webhook</td><td>外部システムとの連携</td><td>LINEからのWebhook接続とは別</td></tr>
+<tr><td>通知</td><td>通知ルール・履歴</td><td>DB記録と外部到達を分ける</td></tr>
+<tr><td>スタッフ管理</td><td>スタッフ作成・ログイン招待</td><td>権限の変更。対象アカウント制限の検証が必要</td></tr>
+<tr><td>LINEアカウント</td><td>登録、登録の有効・無効、削除</td><td>一覧と操作対象が異なる。「有効」は接続テストではない</td></tr>
+<tr><td>UUID管理</td><td>同じ人の対応付け</td><td>本人確認なしの統合や無断の横断利用を避ける</td></tr>
+<tr><td>BAN検知</td><td>エラー・移行情報</td><td>移行ボタンで友だちが新LINEへ一括追加されるわけではない</td></tr>
+<tr><td>緊急コントロール</td><td>一斉配信予約・親シナリオ停止</td><td>全アカウント対象になり得る。全機能停止ではない</td></tr>
+</tbody></table></div>
+<p>メニューにない主要機能は、キーワード自動応答、リッチメニュー編集、フォーム作成、カレンダー予約、個人のシナリオ開始・停止、個人のリマインダ登録・取消、複合条件のセグメント送信です。APIに機能が存在することと、店舗スタッフが画面で操作できることは分けます。</p>
+<h3 id="guide-21">17. 「CCに依頼」は実行ボタンではない</h3>
+<p>押すと「CC プロンプトテンプレート」が開きます。項目を展開し「コピー」で依頼文をコピーし、別途Claude Codeへ貼り付けて使う仕組みです。押しただけでは分析も設定も実行されません。</p>
+<p>現在の依頼文にはアカウント指定がないものがあります。使うときは、対象アカウント、許可する操作、送信の可否を必ず具体化します。「全部停止」「全ての友だちを分析」を、そのまま複数アカウントの環境へ渡しません。</p>
+<h3 id="guide-22">18. 止め方と復旧</h3>
+<p>「全配信停止」は予約一斉配信を下書きへ戻す機能です。キーワード返信、Webhook、有効な自動化、個人のリマインダまで止める総合停止ではありません。</p>
+<p>「シナリオ一括停止」は親シナリオを無効にします。現在の処理では個人の配信中登録を止める保証がありません。また、一括処理が失敗しても「完了」表示になる経路があります。</p>
+<p>緊急時は、原因のアカウントと機能を特定し、担当者が対象を限定した処理で停止します。処理後に残った予約・個人の配信中登録・有効ルールを読み戻します。既に送ったメッセージは、この停止ボタンでは取り消せません。</p>
+<p>復旧も対象を一つずつ確認します。保存日時・再開した時点の順序・期限切れ予約を見直してから再開し、まとめて有効化しません。</p>
+<h3 id="guide-23">19. 困ったときの対応</h3>
+<div class="table-wrap"><table><thead><tr><th>症状</th><th>最初に確認すること</th><th>次の対応</th></tr></thead><tbody>
+<tr><td>操作したいアカウントが選べない</td><td>左上と登録一覧の違い</td><td>管理者がフロントの対象指定とサーバー側の対象制限を確認</td></tr>
+<tr><td>作ったものが消えた</td><td>保存結果の所属アカウント</td><td>再作成を繰り返さず、担当者が保存データを確認</td></tr>
+<tr><td>関係ないタグでもルールが動く</td><td>条件キー、空条件、イベントの所属</td><td><code>tagId</code> の例を信用せず、対象外テストを行う</td></tr>
+<tr><td>同じ案内が複数届く</td><td>公式LINE応答、Harness自動応答、自動化、シナリオ</td><td>送る担当機能を一つにし、登録・再試行の重複を確認</td></tr>
+<tr><td>結果が届かない</td><td>利用者の送信有無、本人対応付け、友だち状態</td><td>受信イベント・送信API結果・端末受信を順に確認</td></tr>
+<tr><td>遅れて届く</td><td>後続ステップの定期処理、時刻、配信時間帯</td><td>実際の稼働スケジュールを確認</td></tr>
+<tr><td>止めたのに届く</td><td>親シナリオと個人登録、別の応答機能</td><td>個人登録と各送信機能を対象限定で停止し読み戻す</td></tr>
+<tr><td>スタッフへ通知が届かない</td><td>dashboard記録か外部通知か</td><td>外部通知の接続と受信を別に確認</td></tr>
+<tr><td>ログインが切れた</td><td>401とログイン画面への移動</td><td>本人の通常ログインをやり直す。認証情報をガイドへ貼らない</td></tr>
+</tbody></table></div>
+<h3 id="guide-24">20. 運用を始める条件</h3>
+<p>アカウントの保存先・送信先・停止対象をサーバーで限定し、条件の不一致を修正することが先です。その後、診断開始から新規友だちの結果受信、面談相談、スタッフ確認、追客停止までを本人のテストで通します。別アカウントにデータ・メッセージ・設定変更が発生しないことも確認します。</p>
+<p>日々店舗スタッフが使う画面は、対象表示、個別チャット、相談の状態、メモに絞る構成が適しています。配信設定と認証・アカウント管理は、設定担当者が扱う構成にします。</p>
+<p>再現方法は <a href="#practice">練習環境の説明</a>、実装上の問題と修正確認は <a href="#audit">技術監査</a> にあります。</p></section>
+<section id="audit" aria-label="問題と修正確認"><h2 id="audit-0">操作理解に伴う技術監査</h2>
+<p>調査日: 2026-10-09。参照ソース: <code>dba7acd94d3ffcfbe398fcfbaef147da6d1bd356</code>。本番の設定変更・送信・デプロイは実施していない。</p>
+<p>「画面確認」は実ブラウザ、「練習」は同じフロントの架空API、「関数確認」は実ソースの関数に架空イベントを渡した結果、「コード確認」は静的な追跡。稼働中バックエンドの完全一致と、過去の個別誤作動原因は未確定。顧客固有のデータ集計は共有プロジェクト記録だけに保存し、この文書やGitへ含めない。</p>
+<h3 id="audit-1">修正順序</h3>
+<p>アカウント分離・条件判定・停止を先に直し、その後に店舗向けの画面を簡略化する。手順の暗記や注意書きだけでは誤作動を防げない。</p>
+<h4 id="audit-2">P0-1 新規保存で所属アカウントを落とす</h4>
+<p>確認: シナリオ・一斉配信を練習環境で作成。どちらもPOSTに <code>lineAccountId</code> がなく、アカウント指定付きの再取得では表示されなかった。バックエンドのシナリオ・配信作成コードも、bodyに指定がある場合だけ所属を保存する。オートメーション・リマインダも同じ入力不足をコードで確認。</p>
+<p>影響: 保存できていないと誤認して重複作成する。所属未指定のルールとして扱われ、送信側の既定アカウント・グローバル互換処理へ進む可能性。</p>
+<p>ソース:</p>
+<ul>
+<li><code>apps/web/src/app/scenarios/page.tsx</code> の <code>handleCreate</code></li>
+<li><code>apps/web/src/components/broadcasts/broadcast-form.tsx</code> の <code>handleSave</code></li>
+<li><code>apps/web/src/app/automations/page.tsx</code>、<code>apps/web/src/app/reminders/page.tsx</code></li>
+<li><code>apps/worker/src/routes/scenarios.ts</code>、<code>broadcasts.ts</code>、<code>automations.ts</code>、<code>reminders.ts</code></li>
+</ul>
+<p>修正確認: 所属はサーバーの認可済み対象から確定。未指定・別アカウント指定を拒否。保存→再読込で同じ対象に一つだけ表示。他アカウントの一覧・ルール・送信を変えない。</p>
+<h4 id="audit-3">P0-2 表示上の限定は全ルートの認可ではない</h4>
+<p>確認: 稼働中アカウント画面では一覧と左上の操作対象が違う。<code>AccountProvider</code> は <code>NEXT_PUBLIC_ALLOWED_ACCOUNT_IDS</code> で表示リストだけを絞るが、accountsページはAPIの全リストをそのまま表示する。</p>
+<p><code>authMiddleware</code> は <code>SCOPED_LINE_ACCOUNT_ID</code> をcontextへ入れる。<code>getScope()</code> を使う一覧ルートには適用されるが、個別IDの取得・更新・削除・送信はそれぞれ所属を検証しない例がある。コメント上の「hardlock」を全機能の保証として扱えない。</p>
+<p>ソース:</p>
+<ul>
+<li><code>apps/web/src/contexts/account-context.tsx</code>、<code>apps/web/src/app/accounts/page.tsx</code></li>
+<li><code>apps/worker/src/middleware/auth.ts</code>、<code>apps/worker/src/utils/scope.ts</code></li>
+<li><code>apps/worker/src/routes/scenarios.ts</code> の詳細・更新・削除・enroll</li>
+<li><code>apps/worker/src/routes/broadcasts.ts</code> の詳細・更新・削除・send</li>
+<li><code>apps/worker/src/routes/auto-replies.ts</code> の作成・ID操作</li>
+<li><code>apps/worker/src/routes/rich-menus.ts</code> のquery/defaultによるclient解決</li>
+</ul>
+<p>修正確認: 認証→アカウント認可→全リソース所属検証を統一。別のID、所属未指定、query省略、body差替え、スタッフ権限の各ケースで拒否。LINE clientの既定値へのfallbackは対象限定処理で禁止。</p>
+<h4 id="audit-4">P0-3 条件入力例が処理側と違い、制限を無視する</h4>
+<p>画面確認: 条件欄の入力例は <code>tagId</code> と <code>operator=equals</code>。処理側の <code>tag_id</code> とは異なる。</p>
+<p>関数確認: 実ソースの <code>matchConditions</code> を取り出し、TypeScriptを変換して架空イベントで実行。</p>
+<div class="table-wrap"><table><thead><tr><th>条件</th><th>イベント</th><th>実際の一致</th><th>意図</th></tr></thead><tbody>
+<tr><td><code>tagId=A, operator=equals</code></td><td><code>tagId=B</code></td><td>true</td><td>false</td></tr>
+<tr><td><code>tag_id=A</code></td><td><code>tagId=B</code></td><td>false</td><td>false</td></tr>
+<tr><td><code>tag_id=A</code></td><td><code>tagId=A</code></td><td>true</td><td>true</td></tr>
+<tr><td>未対応キーだけ</td><td>空イベント</td><td>true</td><td>拒否すべき</td></tr>
+</tbody></table></div>
+<p>ソース: <code>apps/web/src/app/automations/page.tsx</code>、<code>apps/worker/src/services/event-bus.ts</code>。</p>
+<p>再現: <code>node scripts/operator-rehearsal/probe-conditions.mjs</code>。これは障害の観測用であり、安全な判定の合格テストではない。</p>
+<p>修正確認: 条件schemaを入力・保存・実行で共通化。未知のキー・型・イベントに不適切な条件を拒否。未知条件を無条件一致にしない。空条件の意味と対象者を画面で確認可能にする。</p>
+<h4 id="audit-5">P0-4 イベントの所属欠落で他アカウントの自動化も候補になる</h4>
+<p>コード確認: <code>processAutomations</code> は <code>!a.line_account_id || !lineAccountId || a.line_account_id === lineAccountId</code> を許す。タグ付与APIは <code>fireEvent</code> にアカウントを渡さない。タグ付与時のシナリオ登録にも所属の比較がない。</p>
+<p>影響: 所属を持つルールでも、イベント側の所属が空なら他アカウントの候補になる。未指定ルールが今存在しないだけでは、この経路を除去できない。</p>
+<p>ソース: <code>apps/worker/src/routes/friends.ts</code>、<code>apps/worker/src/services/event-bus.ts</code>、<code>apps/worker/src/routes/webhook.ts</code>。</p>
+<p>修正確認: イベントの所属をfriendなどの確定したリソースから解決し必須化。同じ所属のルールだけ実行。許可していないグローバル互換を無効化。通知・送信Webhook・スコアの範囲も同時に検証。</p>
+<h4 id="audit-6">P0-5 親シナリオ無効化は登録済みの送信を止めない</h4>
+<p>コード確認: <code>getFriendScenariosDueForDelivery</code> は <code>friend_scenarios.status=&#x27;active&#x27;</code> と時刻を見る。親の <code>scenarios.is_active</code> を確認せず、後続の送信処理も親無効化を停止条件としていない。</p>
+<p>ソース: <code>packages/db/src/scenarios.ts</code>、<code>apps/worker/src/services/step-delivery.ts</code>。</p>
+<p>修正確認: 親停止、個人停止、アカウント停止を送信直前にも判定。停止後に到来する予約が送られないこと、再開時に古い予約がまとめて送られないことを確認。保留中・失敗・進行中も読み戻す。</p>
+<h4 id="audit-7">P0-6 タグ一斉配信はアカウントを横断できる</h4>
+<p>コード確認: <code>processBroadcastSend</code> のtag経路は <code>getFriendsByTag</code> の結果をアカウントごとに分け、各アカウントのclientで送る。配信の所属に限定するフィルタがない。</p>
+<p>ソース: <code>apps/worker/src/services/broadcast.ts</code>、<code>apps/worker/src/routes/broadcasts.ts</code>。</p>
+<p>修正確認: tag、friend、broadcastの所属が同一であることをサーバーで限定。対象件数・対象アカウントをプレビュー。空対象・混在対象では送信しない。</p>
+<h4 id="audit-8">P0-7 一括停止は広すぎ、停止成功の表示は弱い</h4>
+<p>コード・練習確認: emergency画面はaccountIdなしで配信・シナリオを取得。<code>Promise.allSettled</code> の失敗を集計せず、完了を表示する。全配信停止は予約配信だけ、シナリオ停止は親だけ。自動応答・automation・個人reminderの停止を含まない。</p>
+<p>ソース: <code>apps/web/src/app/emergency/page.tsx</code>。練習の停止操作でもaccount指定なしのGETを確認。</p>
+<p>修正確認: アカウントと停止する機能を明示。失敗・残存件数を表示。処理後の状態をサーバーで再取得し、完了の範囲を正確に示す。既に外部へ送信済みのものは取消扱いにしない。</p>
+<h3 id="audit-9">P1 操作の理解・到達確認を妨げる問題</h3>
+<div class="table-wrap"><table><thead><tr><th>問題</th><th>根拠</th><th>改善・検証</th></tr></thead><tbody>
+<tr><td>後続ステップの時刻を期待しづらい</td><td><code>wrangler.toml</code> は1日2回、step-deliveryは9～23時の制限</td><td>稼働中cronを照合し、面談通知の許容遅延に合う構成へ</td></tr>
+<tr><td>指標が別アカウントを含み得る</td><td>dashboardはfriendCount以外の一部一覧にaccountIdなし</td><td>全指標に対象・期間・集計定義を付ける</td></tr>
+<tr><td>「今月送信」の意味が違う</td><td>line-accounts.tsは直近30日・push相当</td><td>表示名と集計を一致。reply/pushを区別</td></tr>
+<tr><td>フォーム回答の対象不足</td><td>selectedAccount変更でreloadするがrequestにaccountIdなし</td><td>フォーム・回答の所属を検証</td></tr>
+<tr><td>自動応答・予約・リッチメニューのGUI不足</td><td>APIルートはあるが専用pageがない</td><td>日常業務に必要な編集だけ画面化</td></tr>
+<tr><td>画像・Flexの入力がJSON中心</td><td>実画面の種別・内容欄</td><td>画像選択、カード編集、事前表示、サイズ・schema検証</td></tr>
+<tr><td>ロールとアカウント範囲が混同される</td><td>authはroleを設定、scopeはenv依存</td><td>スタッフの許可アカウントを認可に使用、別対象を拒否</td></tr>
+<tr><td>同じLINE user IDの所属更新</td><td>webhook followとfriend upsertの構造</td><td>同一provider内の複数OA追加を試し、所属・履歴を上書きしない</td></tr>
+<tr><td>応答の優先順が分かりにくい</td><td>webhookはcreated_at ASC、最初の一致でbreak</td><td>明示優先度と競合表示。textとpostbackを別検証</td></tr>
+<tr><td>通知の存在とスマホ到達が違う</td><td>event-busはDB通知作成、emailは未実装</td><td>送信処理と受信を別にテスト、未対応チャネルを選択不可に</td></tr>
+<tr><td>「CCに依頼」が実行に見える</td><td>実画面はコピー用モーダル</td><td>コピー用と明示、対象アカウントを依頼文に含める</td></tr>
+<tr><td>アカウント無効化だけでは送信を保証停止しない</td><td>個別send・step送信のclient解決にis_active条件なし</td><td>すべての送信入口でアカウント有効状態を確認</td></tr>
+<tr><td>全員配信の0件が未計測と混同</td><td>broadcast.tsは人数不明の場合0を保存</td><td>未計測・不明・実測0を区別</td></tr>
+<tr><td>BAN移行ボタンが完成移行に見える</td><td>health.tsは移行レコードをin_progressで作成、対象countは全following</td><td>対象を限定し、本人の新OA追加・対応付け成立を別状態に</td></tr>
+</tbody></table></div>
+<h3 id="audit-10">最小の使いやすい運用画面</h3>
+<p>店舗スタッフには「対象アカウント」「未対応相談」「相談内容・診断タイプ」「返信」「担当メモ」「面談の状態」を中心にする。面談申込で追客を止める動作と、日時変更・取消によるリマインダ変更を結び付ける。</p>
+<p>配信設定担当者には、応答内容・対象・条件・開始・停止・テスト受信を一画面で確認できる構成が必要。複数アカウントの切替・削除・認証情報は日常の相談画面から分離する。</p>
+<h3 id="audit-11">再開時の確認</h3>
+<ol>
+<li>実際に配布されているworker/管理画面のrevisionとcronを確定。</li>
+<li>新規保存・全ID操作・イベント・配信・停止にアカウント制約を適用。</li>
+<li>条件schemaを統一し、対象外イベントの否定テストを実施。</li>
+<li>親停止・個人停止・アカウント停止後の送信ゼロを確認。</li>
+<li>既存データの所属未指定・登録の残存を対象限定で確認。復旧できる記録を取って扱う。</li>
+<li>本人端末で診断→新規追加→画像と解説→面談希望→店舗対応→追客停止を確認。</li>
+<li>他アカウントへの書込・送信がないことを確認してから有効化。</li>
+</ol>
+<p>この調査だけでは、既存アカウントの安全な停止や新アカウントの連携完了は成立していない。</p></section>
+<section id="practice" aria-label="練習環境"><h2 id="practice-0">架空データで操作を練習する</h2>
+<p>この練習は実際のフロントエンドコードと、外部送信しないローカルの架空APIを使います。LINEのアカウント、D1、認証情報、利用者のトークを必要としません。実バックエンド・LINE API・cronの動作保証を目的とする環境ではありません。</p>
+<h3 id="practice-1">起動</h3>
+<p>このリポジトリのルートで、依存関係を用意します。</p>
+<pre><code>pnpm install --frozen-lockfile --prefer-offline</code></pre>
+<p>一つ目のターミナル:</p>
+<pre><code>node scripts/operator-rehearsal/mock-api.mjs</code></pre>
+<p>二つ目のターミナル:</p>
+<pre><code>NEXT_PUBLIC_API_URL=http://127.0.0.1:8341 NEXT_PUBLIC_ALLOWED_ACCOUNT_IDS=rehearsal-account pnpm --filter web exec next dev --hostname 127.0.0.1 --port 8342</code></pre>
+<p>ブラウザで <a href="http://127.0.0.1:8342/login">練習ログイン</a> を開き、「APIキーでログイン」を選び、<code>rehearsal-only-not-a-secret</code> を入力します。これは任意の架空値で、認証用の実キーではありません。実際のAPIキーやLINEのトークンは入れません。</p>
+<p>左上に「練習用｜本番送信なし」と表示されることを確認します。URLは127.0.0.1です。</p>
+<h3 id="practice-2">操作と確認結果</h3>
+<div class="table-wrap"><table><thead><tr><th>練習した操作</th><th>結果</th><th>確認の限界</th></tr></thead><tbody>
+<tr><td>APIキーの代替ログイン</td><td>架空環境でログイン後の対象名を表示</td><td>本番の認証・権限は検証しない</td></tr>
+<tr><td>個別チャット</td><td>対応中、メモ、返信、解決済の画面反映</td><td>メッセージはメモリ内に追加。LINEへ送らない</td></tr>
+<tr><td>タグ追加と絞り込み</td><td>面談希望タグを付け、2人から1人へ絞り込み</td><td>タグイベントによる実バックエンドの動作は再現しない</td></tr>
+<tr><td>新規シナリオ作成</td><td>POSTは成功扱い、accountIdなし。再取得した一覧に出ない</td><td>架空APIは参照ソースの保存・絞込みを模倣</td></tr>
+<tr><td>既存シナリオのステップ追加</td><td>無効シナリオに1440分のステップを保存、1日後の表示</td><td>実際の定期処理・端末受信は検証しない</td></tr>
+<tr><td>一斉配信の下書き</td><td>accountIdなしで保存、指定付き一覧に出ない</td><td>外部送信・予約実行なし</td></tr>
+<tr><td>オートメーション編集</td><td>条件・アクションのJSON入力と誤った入力例を確認</td><td>保存・実イベントの配信は実行しない</td></tr>
+<tr><td>CCに依頼</td><td>コピー用の依頼文モーダルを確認</td><td>外部エージェントへ依頼しない</td></tr>
+<tr><td>全配信停止</td><td>確認→実行→完了。一覧取得にaccount指定なし</td><td>架空環境は停止すべき予約0件。実配信停止は検証しない</td></tr>
+<tr><td>条件判定</td><td>実ソース関数で、異なるタグでも誤った入力例が一致</td><td>架空イベント。稼働中版への一致は別確認</td></tr>
+</tbody></table></div>
+<h3 id="practice-3">代表操作の再演習</h3>
+<p>「個別チャット」で練習ユーザーAを開き、「対応中にする」→メモ入力→「メモ保存」→架空の返信→「送信」を試します。返信とメモを読み戻し、「解決済にする」を押します。</p>
+<p>「友だち管理」でAの行を押し、「タグを追加」から面談希望を選びます。上部のタグ絞り込みでAだけになれば操作成功です。</p>
+<p>「シナリオ配信」の練習シナリオを開き、「+ ステップ追加」で遅延1440分を指定します。追加後に「1日後」と表示されることを確認します。</p>
+<p>新規シナリオ・新規配信の保存物が見えない場合は、<a href="http://127.0.0.1:8341/rehearsal/state">架空APIの状態</a> と <a href="http://127.0.0.1:8341/rehearsal/requests">リクエスト一覧</a> で、保存物と所属未指定を確認できます。これらのページには架空データだけを表示します。</p>
+<p>条件関数の観測:</p>
+<pre><code>node scripts/operator-rehearsal/probe-conditions.mjs</code></pre>
+<p>判定がfalseであるべきケースにtrueを返す現象の確認用です。終了コード0は安全性の合格を意味しません。</p>
+<h3 id="practice-4">データと終了</h3>
+<p>架空APIはloopbackだけで待ち受け、外部APIを呼ぶコードを持ちません。データはメモリ内で、停止・再起動すると初期状態に戻ります。リクエスト記録は <code>/tmp/line-harness-operator-rehearsal-20261009.jsonl</code> に出力します。認証ヘッダーは記録しません。練習欄へ実データを入力しないでください。</p>
+<p>両ターミナルをCtrl+Cで終了すれば停止します。サービス登録、起動時自動実行、課金、LINE連携は行いません。</p></section></main></div><footer>確認日 2026-10-09 · 画像はすべて架空データの練習画面 · ローカル閲覧用</footer></body></html>

@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "classifications": [
+    {
+      "text": "タグ付与は分類だけとは限りません。 現在のコードはタグ付与でシナリオや自動化を起動できます。実利用者へ付ける前に、どのルールが動くかを確認します。タグ作成専用の管理ページは現在ありません。",
+      "role": "A",
+      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
+    },
+    {
+      "text": "画像と解説を同時に返す場合、キーワード応答のコードは複数のLINEメッセージを配列で扱えます。Flexカードのpostbackも扱えますが、通常のテキスト受信とpostbackで処理経路が違うため、それぞれ端末で確認します。",
+      "role": "A",
+      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
+    },
+    {
+      "text": "LPの見え方、診断結果保存、友だち追加、画像受信、解説受信、相談申込、スタッフ確認の七つを分けて確認します。既存の友だちで成功しても、新規追加時の経路は別に試します。",
+      "role": "A",
+      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
+    },
+    {
+      "text": "応答後にメッセージ受信イベントの自動化も走り得ます。自動応答と自動化の重複を確認します。",
+      "role": "A",
+      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
+    },
+    {
+      "text": "初回の友だち追加処理には直接返信する経路がありますが、後続ステップは定期処理に依存します。参照した設定ファイルはUTC 0時・12時、JST 9時・21時の実行です。分単位の間隔を期待する場合は、実際の稼働中スケジュールも確認します。夜間の配信制限や揺らぎもコードにあります。",
+      "role": "A",
+      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
+    },
+    {
+      "text": "全員配信の実績「0」は、コードでは送信人数が不明な場合にも保存されます。ゼロ人に配信した証拠にせず、LINEの送信結果と後から取得する実績を確認します。",
+      "role": "A",
+      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
+    },
+    {
+      "text": "前日と直前の通知は、定期実行の頻度が目的に合うか確認します。面談取消時には、個人のリマインダ登録も取り消します。",
+      "role": "A",
+      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
+    },
+    {
+      "text": "復旧も対象を一つずつ確認します。保存日時・再開した時点の順序・期限切れ予約を見直してから再開し、まとめて有効化しません。",
+      "role": "A",
+      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
+    },
+    {
+      "text": "アカウントの保存先・送信先・停止対象をサーバーで限定し、条件の不一致を修正することが先です。その後、診断開始から新規友だちの結果受信、面談相談、スタッフ確認、追客停止までを本人のテストで通します。別アカウントにデータ・メッセージ・設定変更が発生しないことも確認します。",
+      "role": "A",
+      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
+    },
+    {
+      "text": "「画面確認」は実ブラウザ、「練習」は同じフロントの架空API、「関数確認」は実ソースの関数に架空イベントを渡した結果、「コード確認」は静的な追跡。稼働中バックエンドの完全一致と、過去の個別誤作動原因は未確定。顧客固有のデータ集計は共有プロジェクト記録だけに保存し、この文書やGitへ含めない。",
+      "role": "D",
+      "reason": "Evidence boundaries are necessary to distinguish source review and rehearsal from production verification."
+    },
+    {
+      "text": "左上に「練習用|本番送信なし」と表示されることを確認します。URLは127.0.0.1です。",
+      "role": "A",
+      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
+    },
+    {
+      "text": "「シナリオ配信」の練習シナリオを開き、「+ ステップ追加」で遅延1440分を指定します。追加後に「1日後」と表示されることを確認します。",
+      "role": "A",
+      "reason": "Operator procedure or product behavior needed to prevent wrong sends, wrong interpretation, or unsafe restart; not a maker progress promise."
+    }
+  ]
+}
