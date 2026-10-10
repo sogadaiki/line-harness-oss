@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { runInNewContext } from 'node:vm';
 import { pathToFileURL } from 'node:url';
 const worker = (await import(pathToFileURL('/tmp/hinatama-worker-test/hinatama-entry.js'))).default;
 const uid='U'+'a'.repeat(32), bot='U'+'b'.repeat(32), base='https://receiver.example', path='/hinatama/diagnosis';
@@ -127,5 +128,32 @@ test('pre-release fixed-cookie attempts complete only their exact bound receipt'
   assert.equal((await f.callback(s,legacy)).headers.get('location'),s.receipt);
   assert.equal((await(await f.req(s.receipt+'&format=json',{headers:{Cookie:legacy}})).json()).status,'sent');
   assert.equal((await(await f.req(path+'/status?format=json',{headers:{Cookie:legacy}})).json()).status,'sent');
+  assert.equal(f.pushes.length,1);
+});
+test('a sent mobile receipt opens its own chat once and keeps a tap fallback without sending again',async()=>{
+  const f=fixture(),s=await f.start();await f.callback(s);
+  const html=await(await f.req(s.receipt,{headers:{Cookie:s.cookie}})).text();
+  const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const store=new Map(),opened=[];
+  async function render(userAgent,status='sent') {
+    const elements=new Map(),timers=[];
+    const context={
+      navigator:{userAgent},location:{assign:url=>opened.push(url)},
+      sessionStorage:{getItem:key=>store.get(key)||null,setItem:(key,value)=>store.set(key,value)},
+      document:{getElementById(id){if(!elements.has(id))elements.set(id,{textContent:'',hidden:false,href:'https://line.me/R/oaMessage/%40newtest/'});return elements.get(id);}},
+      fetch:async()=>({ok:true,json:async()=>({status,canRetry:false,canReconnect:status==='cancelled'})}),
+      setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout:()=>{}
+    };
+    await runInNewContext(script,context);
+    for(const timer of timers.filter(t=>t.ms===0))timer.fn();
+    return elements;
+  }
+  const first=await render('Mozilla/5.0 (iPhone)');
+  assert.deepEqual(opened,['https://line.me/R/oaMessage/%40newtest/']);
+  assert.equal(first.get('chat').hidden,false);
+  await render('Mozilla/5.0 (iPhone)'); // Browser return/reload cannot trap the visitor.
+  await render('Mozilla/5.0 (Android)','cancelled');
+  store.clear();await render('Mozilla/5.0 (Macintosh)');
+  assert.equal(opened.length,1);
   assert.equal(f.pushes.length,1);
 });
