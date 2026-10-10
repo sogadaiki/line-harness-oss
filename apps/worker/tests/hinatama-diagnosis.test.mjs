@@ -14,6 +14,7 @@ function fixture() {
     CREATE TABLE chats(id TEXT PRIMARY KEY,friend_id TEXT,line_account_id TEXT,status TEXT,last_message_at TEXT,updated_at TEXT);
     INSERT INTO line_accounts VALUES('new','123','new-token','new-secret',1),('old','999','old-token','old-secret',1);`);
   sql.exec(readFileSync(new URL('../../../packages/db/migrations/023_hinatama_diagnosis.sql',import.meta.url),'utf8'));
+  sql.exec(readFileSync(new URL('../../../packages/db/migrations/027_hinatama_diagnosis_control.sql',import.meta.url),'utf8'));
   for(const letter of ['A','B','C','D'])for(const n of [1,2,3])sql.prepare('INSERT INTO hinatama_diagnosis_content VALUES(?,?,?)').run('new',letter+n,JSON.stringify([{type:'image',originalContentUrl:`https://images.example/${letter}.jpg`,previewImageUrl:`https://images.example/${letter}.jpg`},{type:'text',text:`type ${letter+n}`} ]));
   sql.prepare('INSERT INTO hinatama_diagnosis_content VALUES(?,?,?)').run('new','interview',JSON.stringify([{type:'text',text:'staff arranges interview'}]));
   const DB={prepare(query){
@@ -57,3 +58,18 @@ test('cancelled authorization clears transient credentials and never sends',asyn
 process.on('exit',()=>{globalThis.fetch=originalFetch;});
 test('concurrent callbacks atomically claim one delivery',async()=>{const f=fixture();const s=await f.start();const rs=await Promise.all([f.callback(s),f.callback(s)]);assert.deepEqual(rs.map(r=>r.status).sort(),[303,400]);assert.equal(f.pushes.length,1);});
 test('failed webhook storage can be redelivered without duplicate incoming log',async()=>{const f=fixture();f.sql.exec("CREATE TRIGGER temporary_failure BEFORE INSERT ON chats BEGIN SELECT RAISE(ABORT,'test failure'); END;");assert.equal((await f.webhook('message','storage-retry')).status,503);f.sql.exec('DROP TRIGGER temporary_failure');assert.equal((await f.webhook('message','storage-retry')).status,200);assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM messages_log').get().n,1);assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM chats').get().n,1);});
+test('pause blocks automatic result and keyword sends while preserving incoming staff chat',async()=>{
+  const f=fixture();f.setFollow(false);const s=await f.start();await f.callback(s);
+  f.sql.exec("INSERT INTO hinatama_diagnosis_control(line_account_id,is_paused) VALUES('new',1)");
+  assert.equal((await f.req(path+'/start?code=A1')).status,503);
+  assert.equal((await f.webhook('follow','paused-follow')).status,200);
+  assert.equal((await f.webhook('message','paused-interview',{text:'ヒナタマ面談'})).status,200);
+  assert.equal(f.pushes.length,0);assert.equal(f.replies.length,0);
+  assert.equal(f.sql.prepare('SELECT status FROM chats').get().status,'unread');
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM messages_log WHERE direction='incoming'").get().n,1);
+  f.sql.exec("UPDATE hinatama_diagnosis_sessions SET status='cancelled',claimed=1; UPDATE hinatama_diagnosis_control SET is_paused=0");
+  await f.webhook('follow','resumed-follow');
+  assert.equal(f.pushes.length,0);
+  await f.webhook('message','resumed-interview',{text:'ヒナタマ面談'});
+  assert.equal(f.replies.length,1);
+});

@@ -54,6 +54,9 @@ const menuSections = [
     ],
   },
 ]
+const visibleSections = process.env.NEXT_PUBLIC_DIAGNOSIS_ONLY === 'true'
+  ? menuSections.map(section=>({...section,items:section.items.filter(item=>['/','/friends','/chats','/staff','/accounts','/emergency'].includes(item.href)).map(item=>item.href==='/emergency'?{...item,label:'診断返信の休止・再開'}:item)})).filter(section=>section.items.length)
+  : menuSections
 
 function AccountAvatar({ account, size = 32 }: { account: AccountWithStats; size?: number }) {
   const displayName = account.displayName || account.name
@@ -217,7 +220,7 @@ export default function Sidebar() {
 
       {/* ナビゲーション */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {menuSections.map((section, si) => (
+        {visibleSections.map((section, si) => (
           <div key={si}>
             {section.label && (
               <div className="pt-5 pb-2 px-3">

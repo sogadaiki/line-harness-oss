@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { api } from '@/lib/api'
 import CcPromptButton from '@/components/cc-prompt-button'
 import { useAccount } from '@/contexts/account-context'
+import DiagnosisDashboard from '@/components/diagnosis-dashboard'
 
 const ccPrompts = [
   {
@@ -72,6 +73,10 @@ function StatCard({ title, value, loading, icon, href, accentColor = '#06C755' }
 }
 
 export default function DashboardPage() {
+  return process.env.NEXT_PUBLIC_DIAGNOSIS_ONLY === 'true' ? <DiagnosisDashboard /> : <FullDashboard />
+}
+
+function FullDashboard() {
   const { selectedAccountId, selectedAccount } = useAccount()
   const [stats, setStats] = useState<DashboardStats>({
     friendCount: null,

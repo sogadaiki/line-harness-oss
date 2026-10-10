@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { getCookie, setCookie } from 'hono/cookie';
-import { account, api, challenge, deliver, friend, hash, log, messages, now, random, verifiedSignature, type Bindings, type Session } from '../services/hinatama-diagnosis.js';
+import { account, api, challenge, deliver, diagnosisPaused, friend, hash, log, messages, now, random, verifiedSignature, type Bindings, type Session } from '../services/hinatama-diagnosis.js';
 export type DiagnosisEnv = {Bindings: Bindings};
 const app = new Hono<DiagnosisEnv>();
 const root='/hinatama/diagnosis';
@@ -16,9 +16,16 @@ app.use(`${root}/*`,async(c,next)=>{
   if(rates.size>10000) for(const [k,v] of rates) if(v.until<=now()) rates.delete(k);
   return next();
 });
-app.get('/health', async c => c.json({ready:!!(await account(c.env))}));
+app.get('/health', async c => {
+  const a = await account(c.env);
+  if (!a) return c.json({ ready: false }, 503);
+  const content = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM hinatama_diagnosis_content WHERE line_account_id=?').bind(a.id).first<{n:number}>();
+  const paused=await diagnosisPaused(c.env.DB,a.id);
+  return c.json({ ready: content?.n === 16&&!paused, contentCount: content?.n ?? 0,paused }, content?.n === 16&&!paused ? 200 : 503);
+});
 app.get(`${root}/start`,async c=>{
   const a=await account(c.env); if(!a) return c.text('ただいま準備中です。',503);
+  if(await diagnosisPaused(c.env.DB,a.id)) return c.text('結果の自動送信はただいま休止中です。LINEでスタッフにご相談ください。',503);
   const code=c.req.query('code')||''; if(!codes.test(code)) return c.text('診断ページからお進みください。',400);
   const content=await c.env.DB.prepare('SELECT messages_json FROM hinatama_diagnosis_content WHERE line_account_id=? AND code=?').bind(a.id,code).first<{messages_json:string}>();
   if(!content) return c.text('ただいま準備中です。',503);
@@ -26,7 +33,8 @@ app.get(`${root}/start`,async c=>{
   const state=random(), cookie=random(), verifier=random(), nonce=random();
   // Remove only expired transient state from this new account, never old-account/customer logs.
   await c.env.DB.prepare('DELETE FROM hinatama_diagnosis_sessions WHERE line_account_id=? AND expires_at<?').bind(a.id,now()-86400).run();
-  await c.env.DB.prepare('INSERT INTO hinatama_diagnosis_sessions(id,line_account_id,cookie_hash,code,nonce,verifier,messages_json,expires_at,retry_key,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(await hash(state),a.id,await hash(cookie),code,nonce,verifier,content.messages_json,now()+600,crypto.randomUUID(),now()).run();
+  const created=await c.env.DB.prepare('INSERT INTO hinatama_diagnosis_sessions(id,line_account_id,cookie_hash,code,nonce,verifier,messages_json,expires_at,retry_key,created_at) SELECT ?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM hinatama_diagnosis_control WHERE line_account_id=? AND is_paused=1)').bind(await hash(state),a.id,await hash(cookie),code,nonce,verifier,content.messages_json,now()+600,crypto.randomUUID(),now(),a.id).run();
+  if(!created.meta.changes) return c.text('結果の自動送信はただいま休止中です。LINEでスタッフにご相談ください。',503);
   setCookie(c,cookieName,cookie,{path:root,httpOnly:true,secure:true,sameSite:'Lax',maxAge:600});
   const u=new URL('https://access.line.me/oauth2/v2.1/authorize');
   const params={response_type:'code',client_id:c.env.HINATAMA_LOGIN_CHANNEL_ID,redirect_uri:`${c.env.HINATAMA_WORKER_URL}${root}/callback`,state,scope:'profile openid',nonce,bot_prompt:'aggressive',code_challenge:await challenge(verifier),code_challenge_method:'S256',ui_locales:'ja'};
@@ -35,6 +43,7 @@ app.get(`${root}/start`,async c=>{
 });
 app.get(`${root}/callback`,async c=>{
   const a=await account(c.env); if(!a) return c.text('ただいま準備中です。',503);
+  if(await diagnosisPaused(c.env.DB,a.id)) return c.text('結果の自動送信はただいま休止中です。LINEでスタッフにご相談ください。',503);
   const state=c.req.query('state')||'', cookie=getCookie(c,cookieName)||'';
   if(!/^[a-f0-9]{64}$/.test(state)||!/^[a-f0-9]{64}$/.test(cookie)) return c.text('診断ページからもう一度お試しください。',400);
   const sid=await hash(state), ch=await hash(cookie);
@@ -58,9 +67,9 @@ app.get(`${root}/callback`,async c=>{
     const follow=await followRes.json() as {friendFlag:boolean};
     if(typeof follow.friendFlag!=='boolean') throw new Error('friendship_error');
     await friend(c.env.DB,a,identity.sub,follow.friendFlag,identity.name?.slice(0,200));
-    await c.env.DB.prepare("UPDATE hinatama_diagnosis_sessions SET line_user_id=?,status='awaiting_friend',nonce=NULL,verifier=NULL WHERE id=? AND line_account_id=?").bind(identity.sub,sid,a.id).run();
-    await deliver(c.env,a,sid);
-  } catch { await c.env.DB.prepare("UPDATE hinatama_diagnosis_sessions SET status='failed',nonce=NULL,verifier=NULL,last_error='login_failed' WHERE id=? AND line_account_id=?").bind(sid,a.id).run(); }
+    const saved=await c.env.DB.prepare("UPDATE hinatama_diagnosis_sessions SET line_user_id=?,status='awaiting_friend',nonce=NULL,verifier=NULL WHERE id=? AND line_account_id=? AND status!='cancelled'").bind(identity.sub,sid,a.id).run();
+    if(saved.meta.changes) await deliver(c.env,a,sid);
+  } catch { await c.env.DB.prepare("UPDATE hinatama_diagnosis_sessions SET status='failed',nonce=NULL,verifier=NULL,last_error='login_failed' WHERE id=? AND line_account_id=? AND status!='cancelled'").bind(sid,a.id).run(); }
   return c.redirect(`${root}/status`,303);
 });
 async function current(c: Context<DiagnosisEnv>):Promise<Session|null> {
@@ -72,7 +81,7 @@ app.get(`${root}/status`,async c=>{
   const s=await current(c); if(!s) return c.text('受け取り画面の有効期限が切れました。診断ページからもう一度お試しください。',400);
   if(c.req.query('format')==='json') return c.json({status:s.status});
   // LINE accepted is not the same as the recipient having read the message.
-  return c.html(`<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>診断結果をLINEへ｜ヒナタマ熊本</title><style>body{font-family:system-ui,sans-serif;background:#fff7f8;color:#45383e;margin:0;padding:48px 24px}main{max-width:440px;margin:auto}h1{font-size:26px}a,button{display:block;background:#ad517b;color:white;border:0;border-radius:8px;padding:18px;text-decoration:none;font-size:17px;width:auto;margin:16px 0;text-align:center}p{line-height:1.8}</style><main><p>ヒナタマ熊本｜お仕事相談窓口</p><h1 id="heading">診断結果をLINEへ</h1><p id="note">受け取り状況を確認しています。</p><a href="https://line.me/R/oaMessage/${encodeURIComponent(c.env.HINATAMA_BASIC_ID)}/">LINEのトークを開く</a><a id="add" href="https://line.me/R/ti/p/${encodeURIComponent(c.env.HINATAMA_BASIC_ID)}">友だち追加して結果を受け取る</a><button id="retry" hidden>もう一度受け取る</button><a href="https://chat-hinatama.com/lp07/">診断ページに戻る</a><p>診断結果とLINEアカウントを結びつけて送信します。相談・面談の日程は店舗スタッフがご案内します。<a href="https://chat-hinatama.com/privacy/">プライバシーポリシー</a></p></main><script>let n=0;async function read(){try{let d=await(await fetch('${root}/status?format=json')).json();let st=d.status;document.getElementById('add').hidden=st!=='awaiting_friend';document.getElementById('retry').hidden=st!=='failed';document.getElementById('note').textContent=st==='sent'?'診断結果の画像と解説をLINEへ送りました。トークを開いて確認してください。送信ボタンを押す必要はありません。':st==='awaiting_friend'?'あと少しです。ヒナタマを友だち追加すると、診断結果の画像と解説が自動で届きます。':st==='cancelled'?'LINEでの受け取りをキャンセルしました。診断ページからやり直せます。':st==='failed'?'送信を完了できませんでした。もう一度受け取るか、診断ページからお試しください。':'結果をLINEへ送っています。';if(['pending','sending','awaiting_friend'].includes(st)&&n++<60)setTimeout(read,2000);}catch{document.getElementById('note').textContent='通信を確認して、画面を開き直してください。';}}document.getElementById('retry').onclick=async()=>{await fetch('${root}/retry',{method:'POST'});read();};read();</script></html>`);
+  return c.html(`<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>診断結果をLINEへ｜ヒナタマ熊本</title><style>body{font-family:system-ui,sans-serif;background:#fff7f8;color:#45383e;margin:0;padding:48px 24px}main{max-width:440px;margin:auto}h1{font-size:26px}a,button{display:block;background:#ad517b;color:white;border:0;border-radius:8px;padding:18px;text-decoration:none;font-size:17px;width:auto;margin:16px 0;text-align:center}p{line-height:1.8}[hidden]{display:none!important}</style><main><p>ヒナタマ熊本｜お仕事相談窓口</p><h1 id="heading">診断結果をLINEへ</h1><p id="note">受け取り状況を確認しています。</p><a href="https://line.me/R/oaMessage/${encodeURIComponent(c.env.HINATAMA_BASIC_ID)}/">LINEのトークを開く</a><a id="add" href="https://line.me/R/ti/p/${encodeURIComponent(c.env.HINATAMA_BASIC_ID)}">友だち追加して結果を受け取る</a><button id="retry" hidden>もう一度受け取る</button><a href="https://chat-hinatama.com/lp07/">診断ページに戻る</a><p>診断結果とLINEアカウントを結びつけて送信します。相談・面談の日程は店舗スタッフがご案内します。<a href="https://chat-hinatama.com/privacy/">プライバシーポリシー</a></p></main><script>let n=0;async function read(){try{let d=await(await fetch('${root}/status?format=json')).json();let st=d.status;document.getElementById('add').hidden=st!=='awaiting_friend';document.getElementById('retry').hidden=st!=='failed';document.getElementById('note').textContent=st==='sent'?'診断結果の画像と解説をLINEへ送りました。トークを開いて確認してください。送信ボタンを押す必要はありません。':st==='awaiting_friend'?'あと少しです。ヒナタマを友だち追加すると、診断結果の画像と解説が自動で届きます。':st==='cancelled'?'LINEでの受け取りをキャンセルしました。診断ページからやり直せます。':st==='failed'?'送信を完了できませんでした。もう一度受け取るか、診断ページからお試しください。':'結果をLINEへ送っています。';if(['pending','sending','awaiting_friend'].includes(st)&&n++<60)setTimeout(read,2000);}catch{document.getElementById('note').textContent='通信を確認して、画面を開き直してください。';}}document.getElementById('retry').onclick=async()=>{await fetch('${root}/retry',{method:'POST'});read();};read();</script></html>`);
 });
 app.post(`${root}/retry`,async c=>{
   if(c.req.header('Origin')!==c.env.HINATAMA_WORKER_URL) return c.text('Forbidden',403);
@@ -109,7 +118,7 @@ app.post(`${root}/webhook`,async c=>{
       const aliases:Record<string,string>={'ヒナタマ収入':'income','ヒナタマ仕事内容':'job','ヒナタマ仕事':'job','ヒナタマ相談':'consultation','ヒナタマ面接':'interview','ヒナタマ面談':'interview'};
       const result=text?.match(/^ヒナタマ診断([A-D][1-3])$/);
       const code=result?.[1] || aliases[text||''];
-      if(code&&e.replyToken) {
+      if(code&&e.replyToken&&!await diagnosisPaused(c.env.DB,a.id)) {
         const content=await c.env.DB.prepare('SELECT messages_json FROM hinatama_diagnosis_content WHERE line_account_id=? AND code=?').bind(a.id,code).first<{messages_json:string}>();
         if(content) {
           const msgs=messages(content.messages_json,c.env.HINATAMA_IMAGE_ORIGIN);

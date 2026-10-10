@@ -2,6 +2,7 @@ import test, {afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
 import worker from '../src/index.js';
+import isolatedWorker from '../src/hinatama-entry.js';
 import {fixture} from './d1-fixture.mjs';
 import {matchConditions,validConditions} from '../src/utils/automation-conditions.js';
 import {fireEvent} from '../src/services/event-bus.js';
@@ -41,6 +42,71 @@ function setup(scope:string|undefined='a') {
   return {...f,env,request};
 }
 afterEach(()=>{for(const f of fixtures.splice(0))f.close();globalThis.fetch=originalFetch;Date.now=originalNow;});
+
+test('diagnosis pause is owner-only, account-bound and does not rearm cancelled sessions',async()=>{
+  const f=setup();
+  for(const id of ['a','b'])f.sql.prepare("INSERT INTO hinatama_diagnosis_sessions(id,line_account_id,cookie_hash,code,messages_json,expires_at,retry_key,created_at) VALUES(?,?,?,'A1','[]',9999999999,'fixture',1)").run(id,id,'cookie-'+id);
+  assert.equal((await f.request('/api/diagnosis/pause','POST',{},'fixture-staff-key')).status,403);
+  assert.equal((await f.request('/api/diagnosis/pause?lineAccountId=b','POST',{})).status,403);
+  const stopped=await f.request('/api/diagnosis/pause','POST',{});
+  assert.equal(stopped.data.data.paused,true);
+  assert.equal(f.sql.prepare("SELECT status FROM hinatama_diagnosis_sessions WHERE id='a'").get().status,'cancelled');
+  assert.equal(f.sql.prepare("SELECT status FROM hinatama_diagnosis_sessions WHERE id='b'").get().status,'pending');
+  assert.equal((await f.request('/api/diagnosis/status')).data.data.paused,true);
+  assert.equal((await f.request('/api/diagnosis/resume','POST',{})).data.data.paused,false);
+  assert.equal(f.sql.prepare("SELECT status FROM hinatama_diagnosis_sessions WHERE id='a'").get().status,'cancelled');
+  assert.equal(outbound.length,0);
+});
+test('staff login binds the browser state and PKCE; forged callbacks cannot link a staff account', async()=>{
+  const f=setup();
+  f.env.LINE_LOGIN_CHANNEL_ID='456'; f.env.LINE_LOGIN_CHANNEL_SECRET='fixture-login-secret';
+  f.env.WORKER_URL='https://fixture.invalid'; f.env.ADMIN_URL='https://admin.fixture.invalid';
+  const raw=(path:string,headers:Record<string,string>={})=>worker.fetch(new Request('https://fixture.invalid'+path,{headers}),f.env,{} as any);
+  const start=await raw('/auth/staff/line');
+  assert.equal(start.status,302);
+  const url=new URL(start.headers.get('location')!);
+  assert.equal(url.searchParams.get('code_challenge_method'),'S256');
+  const state=url.searchParams.get('state')!;
+  const cookies=start.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ');
+  assert.equal((await raw('/auth/staff/line/callback?code=fake&state='+state)).status,400);
+  assert.equal((await raw('/auth/staff/line/callback?code=fake&state='+ 'f'.repeat(32),{Cookie:cookies})).status,400);
+  assert.equal(outbound.length,0);
+  const uid='U'+'a'.repeat(32);
+  f.sql.prepare('UPDATE staff_members SET line_user_id=? WHERE id=?').run(uid,'staff-test');
+  globalThis.fetch=async(input:any,init:any={})=>{
+    const u=String(input);
+    if(u.endsWith('/token')) {
+      const params=new URLSearchParams(init.body);
+      assert.equal(params.get('client_id'),'456');
+      assert.equal(params.get('client_secret'),'fixture-login-secret');
+      assert.match(params.get('code_verifier')!,/^[a-f0-9]{64}$/);
+      return Response.json({access_token:'fixture-user-token'});
+    }
+    assert.equal(u,'https://api.line.me/v2/profile');
+    return Response.json({userId:uid,displayName:'架空スタッフ'});
+  };
+  const accepted=await raw('/auth/staff/line/callback?code=fixture-code&state='+state,{Cookie:cookies});
+  assert.equal(accepted.status,302);
+  assert.equal(new URL(accepted.headers.get('location')!).origin,'https://admin.fixture.invalid');
+  f.sql.exec("UPDATE staff_members SET is_active=0 WHERE id='staff-test'");
+  assert.equal((await raw('/auth/staff/line/callback?code=fixture-code&state='+state,{Cookie:cookies})).status,403);
+});
+
+test('dedicated entry exposes only the selected account API and diagnosis webhook',async()=>{
+  const f=setup();
+  f.sql.exec("UPDATE line_accounts SET channel_id='123' WHERE id='a'");
+  Object.assign(f.env,{HINATAMA_CHANNEL_ID:'123',HINATAMA_LOGIN_CHANNEL_ID:'456',HINATAMA_LOGIN_SECRET:'fixture-login',HINATAMA_BOT_USER_ID:'U'+'b'.repeat(32),HINATAMA_BASIC_ID:'@fixture',HINATAMA_WORKER_URL:'https://fixture.invalid',HINATAMA_IMAGE_ORIGIN:'https://fixture.invalid'});
+  const raw=(path:string,method='GET')=>isolatedWorker.fetch(new Request('https://fixture.invalid'+path,{method,headers:{Authorization:'Bearer fixture-owner-key'}}),f.env,{} as any);
+  const list=await raw('/api/line-accounts'); assert.equal(list.status,200);
+  assert.deepEqual((await list.json() as any).data.map((a:any)=>a.id),['a']);
+  assert.equal((await raw('/api/friends/friend-b')).status,404);
+  assert.equal((await raw('/webhook','POST')).status,404);
+  assert.equal((await raw('/auth/line')).status,404);
+  assert.equal((await raw('/api/account-stop','POST')).status,409);
+  f.env.SCOPED_LINE_ACCOUNT_ID='b';
+  assert.equal((await raw('/api/line-accounts')).status,503);
+  assert.ok(outbound.every(call=>call.url==='https://api.line.me/v2/bot/info' && call.token==='Bearer fixture-token-a'));
+});
 
 test('unknown or malformed automation conditions fail closed, including missing event fields',()=>{
   assert.equal(matchConditions({tagId:'tag-a'},{eventData:{tagId:'tag-b'}}),false);

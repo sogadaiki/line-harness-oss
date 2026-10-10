@@ -12,6 +12,7 @@ import { processInsightFetch } from './services/insight-fetcher.js';
 import { authMiddleware } from './middleware/auth.js';
 import { accountScopeMiddleware } from './middleware/account-scope.js';
 import { accountStop } from './routes/account-stop.js';
+import { diagnosisAdmin } from './routes/diagnosis-admin.js';
 import { rateLimitMiddleware } from './middleware/rate-limit.js';
 import { webhook } from './routes/webhook.js';
 import { friends } from './routes/friends.js';
@@ -149,6 +150,7 @@ app.route('/', meetCallback);
 app.route('/', messageTemplates);
 app.route('/', authRoutes);
 app.route('/', accountStop);
+app.route('/', diagnosisAdmin);
 
 // Self-hosted QR code proxy — prevents leaking ref tokens to third-party services
 app.get('/api/qr', async (c) => {

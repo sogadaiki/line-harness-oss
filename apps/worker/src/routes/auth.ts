@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import {
   getStaffByLineUserId,
   setStaffLineUserId,
@@ -23,14 +24,22 @@ function getSessionSecret(env: Env['Bindings']): string {
 /**
  * GET /auth/staff/line — Redirect to LINE Login authorization screen
  */
-auth.get('/auth/staff/line', (c) => {
+auth.get('/auth/staff/line', async (c) => {
   const inviteToken = c.req.query('invite') || '';
+  if (inviteToken.length > 256) return c.html(errorPage('招待リンクが無効です'), 400);
 
   // CSRF state: random + optional invite token
   const stateBytes = new Uint8Array(16);
   crypto.getRandomValues(stateBytes);
   const stateRandom = Array.from(stateBytes).map(b => b.toString(16).padStart(2, '0')).join('');
-  const state = inviteToken ? `${stateRandom}:${inviteToken}` : stateRandom;
+  const state = stateRandom;
+  const verifier = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, '0')).join('');
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  const challenge = btoa(String.fromCharCode(...digest)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const options = { path: '/auth/staff/line', httpOnly: true, secure: true, sameSite: 'Lax' as const, maxAge: 600 };
+  setCookie(c, 'lh_staff_state', state, options);
+  setCookie(c, 'lh_staff_verifier', verifier, options);
+  setCookie(c, 'lh_staff_invite', inviteToken, options);
 
   const params = new URLSearchParams({
     response_type: 'code',
@@ -38,6 +47,8 @@ auth.get('/auth/staff/line', (c) => {
     redirect_uri: `${c.env.WORKER_URL}/auth/staff/line/callback`,
     state,
     scope: 'profile openid',
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
   });
 
   return c.redirect(`https://access.line.me/oauth2/v2.1/authorize?${params.toString()}`);
@@ -50,6 +61,13 @@ auth.get('/auth/staff/line/callback', async (c) => {
   const code = c.req.query('code');
   const state = c.req.query('state') || '';
   const error = c.req.query('error');
+  const expectedState = getCookie(c, 'lh_staff_state');
+  const verifier = getCookie(c, 'lh_staff_verifier');
+  const inviteToken = getCookie(c, 'lh_staff_invite') || null;
+  if (!expectedState || !/^[a-f0-9]{32}$/.test(state) || state !== expectedState || !verifier || !/^[a-f0-9]{64}$/.test(verifier)) {
+    return c.html(errorPage('ログイン画面からもう一度お試しください'), 400);
+  }
+  for (const name of ['lh_staff_state', 'lh_staff_verifier', 'lh_staff_invite']) deleteCookie(c, name, { path: '/auth/staff/line', secure: true });
 
   if (error) {
     return c.html(errorPage('LINEログインがキャンセルされました'), 400);
@@ -58,10 +76,6 @@ auth.get('/auth/staff/line/callback', async (c) => {
   if (!code) {
     return c.html(errorPage('認証コードがありません'), 400);
   }
-
-  // Extract invite token from state if present
-  const stateParts = state.split(':');
-  const inviteToken = stateParts.length > 1 ? stateParts.slice(1).join(':') : null;
 
   // Exchange code for access token
   const tokenRes = await fetch('https://api.line.me/oauth2/v2.1/token', {
@@ -73,6 +87,7 @@ auth.get('/auth/staff/line/callback', async (c) => {
       redirect_uri: `${c.env.WORKER_URL}/auth/staff/line/callback`,
       client_id: c.env.LINE_LOGIN_CHANNEL_ID,
       client_secret: c.env.LINE_LOGIN_CHANNEL_SECRET,
+      code_verifier: verifier,
     }),
   });
 
@@ -93,6 +108,7 @@ auth.get('/auth/staff/line/callback', async (c) => {
 
   const profile = await profileRes.json() as { userId: string; displayName: string };
   const lineUserId = profile.userId;
+  if (!/^U[a-f0-9]{32}$/.test(lineUserId)) return c.html(errorPage('LINE本人情報を確認できませんでした'), 400);
 
   const secret = getSessionSecret(c.env);
   const scopedAccountId = c.env.SCOPED_LINE_ACCOUNT_ID;
@@ -100,7 +116,7 @@ auth.get('/auth/staff/line/callback', async (c) => {
   // Case 1: Invite token present — link LINE account to existing staff
   if (inviteToken) {
     const staffByInvite = await getStaffByInviteToken(c.env.DB, inviteToken);
-    if (!staffByInvite) {
+    if (!staffByInvite || !staffByInvite.is_active) {
       return c.html(errorPage('招待リンクが無効か期限切れです'), 400);
     }
 
@@ -125,7 +141,7 @@ auth.get('/auth/staff/line/callback', async (c) => {
 
   // Case 2: Existing staff with this LINE user ID
   const staffByLine = await getStaffByLineUserId(c.env.DB, lineUserId);
-  if (staffByLine) {
+  if (staffByLine?.is_active) {
     const jwt = await signJwt({
       staffId: staffByLine.id,
       role: staffByLine.role,

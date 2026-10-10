@@ -12,6 +12,11 @@ export async function account(env: Bindings): Promise<Account | null> {
   // Never fall back to any existing worker's LINE_* environment or default account.
   return env.DB.prepare('SELECT id,channel_id,channel_access_token,channel_secret,is_active FROM line_accounts WHERE channel_id=? AND is_active=1').bind(env.HINATAMA_CHANNEL_ID).first<Account>();
 }
+export async function diagnosisPaused(db: D1Database, id: string): Promise<boolean> {
+  // A missing control table fails closed; never silently bypass an unapplied migration.
+  const row = await db.prepare('SELECT is_paused FROM hinatama_diagnosis_control WHERE line_account_id=?').bind(id).first<{is_paused:number}>();
+  return row?.is_paused === 1;
+}
 export function messages(raw: string, imageOrigin: string): Message[] {
   const data: unknown = JSON.parse(raw);
   if (!Array.isArray(data) || data.length < 1 || data.length > 5) throw new Error('invalid_content');
@@ -42,6 +47,7 @@ export async function log(db: D1Database, a: Account, fid: string, id: string, d
 }
 export async function deliver(env: Bindings, a: Account, sid: string): Promise<void> {
   const db = env.DB;
+  if (await diagnosisPaused(db,a.id)) return;
   const s = await db.prepare('SELECT * FROM hinatama_diagnosis_sessions WHERE id=? AND line_account_id=?').bind(sid,a.id).first<Session>();
   if (!s?.line_user_id || s.expires_at <= now() || ['sent','cancelled'].includes(s.status)) return;
   const f = await db.prepare('SELECT id,is_following FROM friends WHERE line_user_id=? AND line_account_id=?').bind(s.line_user_id,a.id).first<{id:string;is_following:number}>();
@@ -50,6 +56,7 @@ export async function deliver(env: Bindings, a: Account, sid: string): Promise<v
   const claim = await db.prepare("UPDATE hinatama_diagnosis_sessions SET status='sending',attempted_at=?,last_error=NULL WHERE id=? AND line_account_id=? AND (status IN ('awaiting_friend','failed') OR (status='sending' AND attempted_at<?))").bind(now(),sid,a.id,now()-90).run();
   if (!claim.meta.changes) return;
   try {
+    if (await diagnosisPaused(db,a.id)) return;
     const res = await api('https://api.line.me/v2/bot/message/push',{method:'POST',headers:{Authorization:`Bearer ${a.channel_access_token}`,'Content-Type':'application/json','X-Line-Retry-Key':s.retry_key},body:JSON.stringify({to:s.line_user_id,messages:content})});
     const accepted = res.ok || (res.status===409 && !!res.headers.get('X-Line-Accepted-Request-Id'));
     if (!accepted) throw new Error(`line_${res.status}`);
@@ -59,6 +66,6 @@ export async function deliver(env: Bindings, a: Account, sid: string): Promise<v
     await db.prepare("UPDATE hinatama_diagnosis_sessions SET status='sent',nonce=NULL,verifier=NULL,last_error=NULL WHERE id=? AND line_account_id=?").bind(sid,a.id).run();
   } catch (e) {
     const error = e instanceof Error && /^line_\d+$/.test(e.message) ? e.message : 'delivery_error';
-    await db.prepare("UPDATE hinatama_diagnosis_sessions SET status='failed',last_error=? WHERE id=? AND line_account_id=?").bind(error,sid,a.id).run();
+    await db.prepare("UPDATE hinatama_diagnosis_sessions SET status='failed',last_error=? WHERE id=? AND line_account_id=? AND status!='cancelled'").bind(error,sid,a.id).run();
   }
 }

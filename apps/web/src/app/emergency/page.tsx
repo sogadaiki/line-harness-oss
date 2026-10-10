@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import Header from '@/components/layout/header'
 import CcPromptButton from '@/components/cc-prompt-button'
 import { useAccount } from '@/contexts/account-context'
+import DiagnosisEmergency from '@/components/diagnosis-emergency'
 
 type ActionStatus = 'idle' | 'confirming' | 'executing' | 'done' | 'error'
 
@@ -33,6 +34,9 @@ const emergencyPrompts = [
 ]
 
 export default function EmergencyPage() {
+  return process.env.NEXT_PUBLIC_DIAGNOSIS_ONLY==='true'?<DiagnosisEmergency/>:<FullEmergencyPage/>
+}
+function FullEmergencyPage() {
   const {selectedAccountId, selectedAccount} = useAccount()
   const currentAccount = useRef(selectedAccountId)
   currentAccount.current = selectedAccountId
