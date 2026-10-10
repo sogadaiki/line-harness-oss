@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "deploy": "vite build && wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "test:account-isolation": "node tests/run.mjs"
+    "test:account-isolation": "node tests/run.mjs",
+    "test:diagnosis": "wrangler deploy --config wrangler.hinatama-diagnosis.toml --dry-run --outdir /tmp/hinatama-worker-test && node --test tests/hinatama-diagnosis.test.mjs"
   },
   "dependencies": {
     "hono": "^4.6.0",

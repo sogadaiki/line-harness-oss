@@ -1,0 +1,12 @@
+name = "hinatama-diagnosis-worker"
+main = "src/hinatama-entry.ts"
+compatibility_date = "2024-12-01"
+
+# Standalone receiver: no existing worker, assets or cron is changed.
+# Supply new-account IDs at deployment; login secret via wrangler secret.
+[[d1_databases]]
+binding = "DB"
+database_name = "hinatama-line-c"
+# Deployment supplies the dedicated database ID in a private generated config.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "../../packages/db/migrations"
