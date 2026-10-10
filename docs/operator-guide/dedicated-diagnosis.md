@@ -11,7 +11,7 @@ Use this entry for a newly provisioned account and a separate empty D1 database.
 
 ## Install and update
 
-Generate a current empty schema with `node scripts/build-fresh-db-schema.mjs <private-output.sql>`. It includes numeric migration receipts so a later `wrangler d1 migrations apply` does not repeat historical ALTER statements. Import it only after verifying zero existing application tables. Seed account credentials, an owner grant and reviewed content through private files outside Git. Never copy legacy friend/chat data as a bootstrap shortcut.
+Generate a current empty schema with `node scripts/build-fresh-db-schema.mjs <private-output.sql>`. It includes receipts for every SQL migration, including date-named files, so a later `wrangler d1 migrations apply` does not repeat historical statements. Import it only after verifying zero existing application tables. Seed account credentials, an owner grant and reviewed content through private files outside Git. Never copy legacy friend/chat data as a bootstrap shortcut.
 
 For an existing dedicated installation, apply only pending numeric migrations to that exact database before deploying the worker. Migration027 adds a pause table without changing any account's state. Keep actual deployment configuration, credential references and seed payloads in the user's private recovery store. The tracked standalone config contains placeholders.
 
