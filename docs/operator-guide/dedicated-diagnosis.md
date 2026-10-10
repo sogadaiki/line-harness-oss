@@ -23,6 +23,10 @@ The generic `/api/account-stop` is rejected by this entry because it does not co
 
 ## Acceptance and recovery
 
+Receipt URLs identify the exact diagnosis with a hashed attempt ID. An attempt also requires its own short-lived HttpOnly/Secure browser cookie, matching account and non-expired session. Another attempt cannot replace a sent receipt's status; an ID alone never authorizes reading or retrying it. The callback, HTML, JSON poll and retry all use the same attempt. In-flight pre-release fixed cookies are accepted only when they match that exact session.
+
+Render the recorded state before JavaScript polling. Sent means LINE accepted the request, not proof of human receipt/read. Unfinished consent does not claim that the visitor deliberately cancelled: offer reconnection for the same diagnosis code without repeating eight questions. Failed Login reconnects; failed delivery retries with the same idempotency key. Do not retry a cancelled or expired session as a new send.
+
 Run worker typecheck, account-isolation tests, diagnosis tests and the diagnostic admin production build. Their provider calls are stubbed; no real messages are sent. Then check the deployed health, owner-scoped status, unauthenticated rejection, foreign-account rejection, LINE Login publication and webhook status. Finally use an owner iPhone for public LP → eight answers → new account → automatic matching image and explanation → interview keyword → staff unread chat. Record the human receipt separately.
 
 If receipt fails, inspect session error/status and webhook event aggregates in the dedicated DB. Preserve incoming chats. A provider quota, rejected authentication or failed message is not success. Use the current account's private recovery guide to restore reviewed content/configuration; do not reset a shared DB or activate duplicate native replies.

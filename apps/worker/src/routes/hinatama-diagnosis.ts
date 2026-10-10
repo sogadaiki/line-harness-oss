@@ -5,6 +5,9 @@ export type DiagnosisEnv = {Bindings: Bindings};
 const app = new Hono<DiagnosisEnv>();
 const root='/hinatama/diagnosis';
 const cookieName='hinatama_diagnosis';
+const receiptCookie=(id:string)=>`${cookieName}_${id.slice(0,16)}`;
+const receiptPath=(id:string)=>`${root}/status?attempt=${id}`;
+const validId=/^[a-f0-9]{64}$/;
 const codes=/^[A-D][1-3]$/;
 const rates=new Map<string,{count:number;until:number}>();
 app.use(`${root}/*`,async(c,next)=>{
@@ -30,12 +33,14 @@ app.get(`${root}/start`,async c=>{
   const content=await c.env.DB.prepare('SELECT messages_json FROM hinatama_diagnosis_content WHERE line_account_id=? AND code=?').bind(a.id,code).first<{messages_json:string}>();
   if(!content) return c.text('ただいま準備中です。',503);
   messages(content.messages_json,c.env.HINATAMA_IMAGE_ORIGIN);
-  const state=random(), cookie=random(), verifier=random(), nonce=random();
+  const state=random(), cookie=random(), verifier=random(), nonce=random(),sid=await hash(state);
   // Remove only expired transient state from this new account, never old-account/customer logs.
   await c.env.DB.prepare('DELETE FROM hinatama_diagnosis_sessions WHERE line_account_id=? AND expires_at<?').bind(a.id,now()-86400).run();
-  const created=await c.env.DB.prepare('INSERT INTO hinatama_diagnosis_sessions(id,line_account_id,cookie_hash,code,nonce,verifier,messages_json,expires_at,retry_key,created_at) SELECT ?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM hinatama_diagnosis_control WHERE line_account_id=? AND is_paused=1)').bind(await hash(state),a.id,await hash(cookie),code,nonce,verifier,content.messages_json,now()+600,crypto.randomUUID(),now(),a.id).run();
+  const created=await c.env.DB.prepare('INSERT INTO hinatama_diagnosis_sessions(id,line_account_id,cookie_hash,code,nonce,verifier,messages_json,expires_at,retry_key,created_at) SELECT ?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM hinatama_diagnosis_control WHERE line_account_id=? AND is_paused=1)').bind(sid,a.id,await hash(cookie),code,nonce,verifier,content.messages_json,now()+600,crypto.randomUUID(),now(),a.id).run();
   if(!created.meta.changes) return c.text('結果の自動送信はただいま休止中です。LINEでスタッフにご相談ください。',503);
-  setCookie(c,cookieName,cookie,{path:root,httpOnly:true,secure:true,sameSite:'Lax',maxAge:600});
+  // Separate browser receipts survive a second visit/back navigation. A single
+  // latest-attempt cookie used to make an earlier successful screen show cancelled.
+  setCookie(c,receiptCookie(sid),cookie,{path:root,httpOnly:true,secure:true,sameSite:'Lax',maxAge:600});
   const u=new URL('https://access.line.me/oauth2/v2.1/authorize');
   const params={response_type:'code',client_id:c.env.HINATAMA_LOGIN_CHANNEL_ID,redirect_uri:`${c.env.HINATAMA_WORKER_URL}${root}/callback`,state,scope:'profile openid',nonce,bot_prompt:'aggressive',code_challenge:await challenge(verifier),code_challenge_method:'S256',ui_locales:'ja'};
   for(const [k,v] of Object.entries(params)) u.searchParams.set(k,v);
@@ -44,14 +49,19 @@ app.get(`${root}/start`,async c=>{
 app.get(`${root}/callback`,async c=>{
   const a=await account(c.env); if(!a) return c.text('ただいま準備中です。',503);
   if(await diagnosisPaused(c.env.DB,a.id)) return c.text('結果の自動送信はただいま休止中です。LINEでスタッフにご相談ください。',503);
-  const state=c.req.query('state')||'', cookie=getCookie(c,cookieName)||'';
-  if(!/^[a-f0-9]{64}$/.test(state)||!/^[a-f0-9]{64}$/.test(cookie)) return c.text('診断ページからもう一度お試しください。',400);
-  const sid=await hash(state), ch=await hash(cookie);
+  const state=c.req.query('state')||'';
+  if(!validId.test(state)) return c.text('診断ページからもう一度お試しください。',400);
+  const sid=await hash(state);
+  // Allow only an exact legacy-cookie/session match for attempts already in flight
+  // when this release is deployed. Never pick another diagnosis as a fallback.
+  const cookie=getCookie(c,receiptCookie(sid))||getCookie(c,cookieName)||'';
+  if(!validId.test(cookie)) return c.text('診断ページからもう一度お試しください。',400);
+  const ch=await hash(cookie);
   const s=await c.env.DB.prepare('SELECT * FROM hinatama_diagnosis_sessions WHERE id=? AND line_account_id=? AND cookie_hash=?').bind(sid,a.id,ch).first<Session>();
   if(!s||s.expires_at<=now()||s.claimed) return c.text('診断ページからもう一度お試しください。',400);
   const claim=await c.env.DB.prepare('UPDATE hinatama_diagnosis_sessions SET claimed=1 WHERE id=? AND line_account_id=? AND claimed=0').bind(sid,a.id).run();
   if(!claim.meta.changes) return c.text('診断ページからもう一度お試しください。',400);
-  if(c.req.query('error')) { await c.env.DB.prepare("UPDATE hinatama_diagnosis_sessions SET status='cancelled',nonce=NULL,verifier=NULL WHERE id=? AND line_account_id=?").bind(sid,a.id).run(); return c.redirect(`${root}/status`,303); }
+  if(c.req.query('error')) { await c.env.DB.prepare("UPDATE hinatama_diagnosis_sessions SET status='cancelled',nonce=NULL,verifier=NULL,last_error='authorization_denied' WHERE id=? AND line_account_id=?").bind(sid,a.id).run(); return c.redirect(receiptPath(sid),303); }
   try {
     const code=c.req.query('code'); if(!code || code.length>2048) throw new Error('oauth_error');
     const tokenRes=await api('https://api.line.me/oauth2/v2.1/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:`${c.env.HINATAMA_WORKER_URL}${root}/callback`,client_id:c.env.HINATAMA_LOGIN_CHANNEL_ID,client_secret:c.env.HINATAMA_LOGIN_SECRET,code_verifier:s.verifier})});
@@ -70,18 +80,41 @@ app.get(`${root}/callback`,async c=>{
     const saved=await c.env.DB.prepare("UPDATE hinatama_diagnosis_sessions SET line_user_id=?,status='awaiting_friend',nonce=NULL,verifier=NULL WHERE id=? AND line_account_id=? AND status!='cancelled'").bind(identity.sub,sid,a.id).run();
     if(saved.meta.changes) await deliver(c.env,a,sid);
   } catch { await c.env.DB.prepare("UPDATE hinatama_diagnosis_sessions SET status='failed',nonce=NULL,verifier=NULL,last_error='login_failed' WHERE id=? AND line_account_id=? AND status!='cancelled'").bind(sid,a.id).run(); }
-  return c.redirect(`${root}/status`,303);
+  return c.redirect(receiptPath(sid),303);
 });
 async function current(c: Context<DiagnosisEnv>):Promise<Session|null> {
-  const a=await account(c.env), cookie=getCookie(c,cookieName)||'';
-  if(!a||!/^[a-f0-9]{64}$/.test(cookie)) return null;
+  const a=await account(c.env), id=c.req.query('attempt');
+  if(!a) return null;
+  if(id!==undefined) {
+    if(!validId.test(id)) return null;
+    const cookie=getCookie(c,receiptCookie(id))||getCookie(c,cookieName)||'';
+    if(!validId.test(cookie)) return null;
+    return c.env.DB.prepare('SELECT * FROM hinatama_diagnosis_sessions WHERE id=? AND cookie_hash=? AND line_account_id=? AND expires_at>?').bind(id,await hash(cookie),a.id,now()).first<Session>();
+  }
+  // Only pre-release receipts used this URL/cookie. New cookies require their
+  // explicit attempt ID; an ambiguous URL must not guess the latest session.
+  const cookie=getCookie(c,cookieName)||'';
+  if(!validId.test(cookie)) return null;
   return c.env.DB.prepare('SELECT * FROM hinatama_diagnosis_sessions WHERE cookie_hash=? AND line_account_id=? AND expires_at>? ORDER BY created_at DESC LIMIT 1').bind(await hash(cookie),a.id,now()).first<Session>();
+}
+const receiptViews={
+  sent:{heading:'結果をLINEに送りました',note:'診断結果の画像と解説を送信しました。下のボタンからLINEのトークでご確認ください。送信ボタンを押す必要はありません。'},
+  awaiting_friend:{heading:'あと一歩で、診断結果へ',note:'ヒナタマを友だち追加すると、診断結果の画像と解説が自動で届きます。'},
+  cancelled:{heading:'診断結果は、まだ受け取れます',note:'LINEとの連携がまだ完了していません。下のボタンから続けられます。8問への回答をやり直す必要はありません。'},
+  failed:{heading:'結果の受け取りを完了できませんでした',note:'下のボタンからもう一度お試しください。8問への回答をやり直す必要はありません。'},
+  pending:{heading:'診断結果をLINEへ',note:'LINEとの連携を確認しています。'},
+  sending:{heading:'診断結果をLINEへ',note:'診断結果の画像と解説をLINEへ送っています。'}
+};
+function receiptState(s:Session) {
+  const status=s.status in receiptViews?s.status:'pending';
+  return {status,canRetry:status==='failed'&&!!s.line_user_id,canReconnect:codes.test(s.code)&&(status==='cancelled'||(status==='failed'&&!s.line_user_id))};
 }
 app.get(`${root}/status`,async c=>{
   const s=await current(c); if(!s) return c.text('受け取り画面の有効期限が切れました。診断ページからもう一度お試しください。',400);
-  if(c.req.query('format')==='json') return c.json({status:s.status});
+  const state=receiptState(s),view=receiptViews[state.status as keyof typeof receiptViews];
+  if(c.req.query('format')==='json') return c.json(state);
   // LINE accepted is not the same as the recipient having read the message.
-  return c.html(`<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>診断結果をLINEへ｜ヒナタマ熊本</title><style>body{font-family:system-ui,sans-serif;background:#fff7f8;color:#45383e;margin:0;padding:48px 24px}main{max-width:440px;margin:auto}h1{font-size:26px}a,button{display:block;background:#ad517b;color:white;border:0;border-radius:8px;padding:18px;text-decoration:none;font-size:17px;width:auto;margin:16px 0;text-align:center}p{line-height:1.8}[hidden]{display:none!important}</style><main><p>ヒナタマ熊本｜お仕事相談窓口</p><h1 id="heading">診断結果をLINEへ</h1><p id="note">受け取り状況を確認しています。</p><a href="https://line.me/R/oaMessage/${encodeURIComponent(c.env.HINATAMA_BASIC_ID)}/">LINEのトークを開く</a><a id="add" href="https://line.me/R/ti/p/${encodeURIComponent(c.env.HINATAMA_BASIC_ID)}">友だち追加して結果を受け取る</a><button id="retry" hidden>もう一度受け取る</button><a href="https://chat-hinatama.com/lp07/">診断ページに戻る</a><p>診断結果とLINEアカウントを結びつけて送信します。相談・面談の日程は店舗スタッフがご案内します。<a href="https://chat-hinatama.com/privacy/">プライバシーポリシー</a></p></main><script>let n=0;async function read(){try{let d=await(await fetch('${root}/status?format=json')).json();let st=d.status;document.getElementById('add').hidden=st!=='awaiting_friend';document.getElementById('retry').hidden=st!=='failed';document.getElementById('note').textContent=st==='sent'?'診断結果の画像と解説をLINEへ送りました。トークを開いて確認してください。送信ボタンを押す必要はありません。':st==='awaiting_friend'?'あと少しです。ヒナタマを友だち追加すると、診断結果の画像と解説が自動で届きます。':st==='cancelled'?'LINEでの受け取りをキャンセルしました。診断ページからやり直せます。':st==='failed'?'送信を完了できませんでした。もう一度受け取るか、診断ページからお試しください。':'結果をLINEへ送っています。';if(['pending','sending','awaiting_friend'].includes(st)&&n++<60)setTimeout(read,2000);}catch{document.getElementById('note').textContent='通信を確認して、画面を開き直してください。';}}document.getElementById('retry').onclick=async()=>{await fetch('${root}/retry',{method:'POST'});read();};read();</script></html>`);
+  return c.html(`<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>診断結果をLINEへ｜ヒナタマ熊本</title><style>body{font-family:system-ui,sans-serif;background:#fff7f8;color:#45383e;margin:0;padding:36px 24px}main{max-width:440px;margin:auto}h1{font-size:26px;line-height:1.5}a,button{display:block;background:#ad517b;color:white;border:0;border-radius:8px;padding:18px;text-decoration:none;font-size:17px;width:auto;margin:16px 0;text-align:center}button{width:100%;cursor:pointer}p{line-height:1.8}.secondary{background:transparent;color:#725662;padding:8px;font-size:14px;text-decoration:underline}.detail{font-size:13px;color:#725662;margin-top:28px}[hidden]{display:none!important}</style><main><p>ヒナタマ熊本｜お仕事相談窓口</p><h1 id="heading">${view.heading}</h1><p id="note">${view.note}</p><a id="chat" ${state.status==='sent'?'':'hidden'} href="https://line.me/R/oaMessage/${encodeURIComponent(c.env.HINATAMA_BASIC_ID)}/">LINEのトークで結果を見る</a><a id="add" ${state.status==='awaiting_friend'?'':'hidden'} href="https://line.me/R/ti/p/${encodeURIComponent(c.env.HINATAMA_BASIC_ID)}">友だち追加して結果を受け取る</a><button id="retry" ${state.canRetry?'':'hidden'}>結果をもう一度受け取る</button><a id="reconnect" ${state.canReconnect?'':'hidden'} href="${root}/start?code=${codes.test(s.code)?s.code:'A1'}">LINEに連携して結果を受け取る</a><p id="connection" role="status"></p><a class="secondary" href="https://chat-hinatama.com/lp07/">診断ページに戻る</a><p class="detail">相談・面談の日程は店舗スタッフがご案内します。<a class="secondary" href="https://chat-hinatama.com/privacy/">プライバシーポリシー</a></p></main><script>const views=${JSON.stringify(receiptViews)};let n=0;function show(d){const st=d.status,v=views[st];if(!v)throw Error('status');document.getElementById('heading').textContent=v.heading;document.getElementById('note').textContent=v.note;document.getElementById('chat').hidden=st!=='sent';document.getElementById('add').hidden=st!=='awaiting_friend';document.getElementById('retry').hidden=!d.canRetry;document.getElementById('reconnect').hidden=!d.canReconnect;document.getElementById('connection').textContent='';return st;}async function read(){try{const r=await fetch('${receiptPath(s.id)}&format=json');if(!r.ok)throw Error('request');const st=show(await r.json());if(['pending','sending','awaiting_friend'].includes(st)&&n++<60)setTimeout(read,2000);}catch{document.getElementById('connection').textContent='状況を更新できませんでした。通信を確認してから画面を開き直してください。';}}document.getElementById('retry').onclick=async()=>{const b=document.getElementById('retry');b.disabled=true;try{const r=await fetch('${root}/retry?attempt=${s.id}',{method:'POST'});if(!r.ok)throw Error('retry');await read();}catch{document.getElementById('connection').textContent='受け取りを完了できませんでした。少し時間をおいてもう一度お試しください。';}finally{b.disabled=false;}};read();</script></html>`);
 });
 app.post(`${root}/retry`,async c=>{
   if(c.req.header('Origin')!==c.env.HINATAMA_WORKER_URL) return c.text('Forbidden',403);
