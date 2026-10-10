@@ -1,7 +1,7 @@
 export type Message = { type: 'text'; text: string } | { type: 'image'; originalContentUrl: string; previewImageUrl: string };
 export type Account = { id: string; channel_id: string; channel_access_token: string; channel_secret: string; is_active: number };
 export type Session = { id: string; line_account_id: string; cookie_hash: string; code: string; nonce: string; verifier: string; messages_json: string; expires_at: number; claimed: number; line_user_id: string | null; status: string; retry_key: string; attempted_at: number | null; created_at: number };
-export type Bindings = { DB: D1Database; HINATAMA_CHANNEL_ID: string; HINATAMA_LOGIN_CHANNEL_ID: string; HINATAMA_LOGIN_SECRET: string; HINATAMA_BOT_USER_ID: string; HINATAMA_BASIC_ID: string; HINATAMA_WORKER_URL: string; HINATAMA_IMAGE_ORIGIN: string };
+export type Bindings = { DB: D1Database; HINATAMA_CHANNEL_ID: string; HINATAMA_LOGIN_CHANNEL_ID: string; HINATAMA_LOGIN_SECRET: string; HINATAMA_BOT_USER_ID: string; HINATAMA_BASIC_ID: string; HINATAMA_WORKER_URL: string; HINATAMA_IMAGE_ORIGIN: string; HINATAMA_DIAGNOSIS_PUBLIC_URL?: string; HINATAMA_BRIDGE_SECRET?: string };
 const encoder = new TextEncoder();
 export const now = () => Math.floor(Date.now() / 1000);
 export const random = () => Array.from(crypto.getRandomValues(new Uint8Array(32)), v => v.toString(16).padStart(2, '0')).join('');

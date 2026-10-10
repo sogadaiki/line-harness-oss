@@ -1,12 +1,12 @@
 import { Hono } from 'hono';
-import { hinatamaDiagnosis, type DiagnosisEnv } from './routes/hinatama-diagnosis.js';
+import { diagnosisRecovery, hinatamaDiagnosis, type DiagnosisEnv } from './routes/hinatama-diagnosis.js';
 import harness, { type Env } from './index.js';
 import { account } from './services/hinatama-diagnosis.js';
 
 // Dedicated DB and account. The generic webhook is never exposed and no cron is installed.
 const app = new Hono<DiagnosisEnv>();
 app.route('/', hinatamaDiagnosis);
-app.onError(() => new Response('処理を完了できませんでした。診断ページからもう一度お試しください。', { status: 503, headers: { 'Cache-Control': 'no-store' } }));
+app.onError((_error,c) => diagnosisRecovery(c,'接続を完了できませんでした。少し時間をおいてから診断ページへ戻るか、LINEでスタッフにご相談ください。',503));
 export default {
   async fetch(request: Request, env: DiagnosisEnv['Bindings'] & Env['Bindings'], ctx: ExecutionContext) {
     const path = new URL(request.url).pathname;

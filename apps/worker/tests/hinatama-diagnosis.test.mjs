@@ -29,10 +29,10 @@ function fixture() {
     };
   }};
   const env={DB,HINATAMA_CHANNEL_ID:'123',HINATAMA_LOGIN_CHANNEL_ID:'456',HINATAMA_LOGIN_SECRET:'new-login-secret',HINATAMA_BOT_USER_ID:bot,HINATAMA_BASIC_ID:'@newtest',HINATAMA_WORKER_URL:base,HINATAMA_IMAGE_ORIGIN:'https://images.example'};
-  let follow=true,pushStatus=200,badIdentity=false;const pushes=[],replies=[];
+  let follow=true,pushStatus=200,badIdentity=false,tokenFailure=false;const pushes=[],replies=[],tokenCallbacks=[];
   globalThis.fetch=async(url,opts={})=>{
     assert.match(String(url),/^https:\/\/api\.line\.me\//);
-    if(String(url).endsWith('/token')) {const params=new URLSearchParams(opts.body);assert.equal(params.get('client_id'),'456');assert.equal(params.get('client_secret'),'new-login-secret');assert.equal(params.get('code_verifier').length,64);const row=sql.prepare('SELECT nonce FROM hinatama_diagnosis_sessions WHERE verifier=?').get(params.get('code_verifier'));assert.ok(row);return Response.json({access_token:'user-token',id_token:'id-token:'+row.nonce});}
+    if(String(url).endsWith('/token')) {if(tokenFailure)throw Error('simulated timeout with private details');const params=new URLSearchParams(opts.body);tokenCallbacks.push(params.get('redirect_uri'));assert.equal(params.get('client_id'),'456');assert.equal(params.get('client_secret'),'new-login-secret');assert.equal(params.get('code_verifier').length,64);const row=sql.prepare('SELECT nonce FROM hinatama_diagnosis_sessions WHERE verifier=?').get(params.get('code_verifier'));assert.ok(row);return Response.json({access_token:'user-token',id_token:'id-token:'+row.nonce});}
     if(String(url).endsWith('/verify')) {const params=new URLSearchParams(opts.body);const nonce=params.get('id_token').slice('id-token:'.length);assert.equal(params.get('nonce'),nonce);return Response.json({iss:'https://access.line.me',aud:badIdentity?'999':'456',nonce,sub:uid,exp:Math.floor(Date.now()/1000)+300});}
     if(String(url).endsWith('/status')) {assert.equal(opts.headers.Authorization,'Bearer user-token');return Response.json({friendFlag:follow});}
     if(String(url).endsWith('/push')) {assert.equal(opts.headers.Authorization,'Bearer new-token');assert.equal(JSON.parse(opts.body).to,uid);pushes.push({body:JSON.parse(opts.body),key:opts.headers['X-Line-Retry-Key']});return new Response('{}',{status:pushStatus,headers:pushStatus===409?{'X-Line-Accepted-Request-Id':'accepted'}:{}});}
@@ -43,7 +43,7 @@ function fixture() {
   async function start(code='A1') {const r=await req(path+'/start?code='+code);assert.equal(r.status,302);const u=new URL(r.headers.get('location'));assert.equal(u.searchParams.get('bot_prompt'),'aggressive');assert.equal(u.searchParams.get('scope'),'profile openid');assert.equal(u.searchParams.get('code_challenge_method'),'S256');const cookie=r.headers.get('set-cookie').split(';')[0];assert.match(r.headers.get('set-cookie'),/HttpOnly/);assert.match(r.headers.get('set-cookie'),/Secure/);const state=u.searchParams.get('state'),id=createHash('sha256').update(state).digest('hex');return{state,cookie,id,receipt:path+'/status?attempt='+id,retry:path+'/retry?attempt='+id};}
   const callback=(s,cookie=s.cookie)=>req(path+'/callback?state='+s.state+'&code=valid-code',{headers:{Cookie:cookie}});
   async function webhook(type,eventId,options={}) {const body=JSON.stringify({destination:options.destination||bot,events:[{type,webhookEventId:eventId,source:{type:'user',userId:uid},replyToken:'reply-token',message:type==='message'?{type:'text',text:options.text||'面談希望です'}:undefined}]});const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(options.secret||'new-secret'),{name:'HMAC',hash:'SHA-256'},false,['sign']);const signature=Buffer.from(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(body))).toString('base64');return req(path+'/webhook',{method:'POST',headers:{'x-line-signature':signature},body});}
-  return {sql,env,req,start,callback,webhook,pushes,replies,setFollow:v=>follow=v,setPush:v=>pushStatus=v,setBad:v=>badIdentity=v};
+  return {sql,env,req,start,callback,webhook,pushes,replies,tokenCallbacks,setFollow:v=>follow=v,setPush:v=>pushStatus=v,setBad:v=>badIdentity=v,setTokenFailure:v=>tokenFailure=v};
 }
 test('all twelve codes deliver image then text without a sent keyword',async()=>{for(const c of ['A1','A2','A3','B1','B2','B3','C1','C2','C3','D1','D2','D3']){const f=fixture();const s=await f.start(c);assert.equal((await f.callback(s)).status,303);assert.equal(f.pushes.length,1);assert.equal(f.pushes[0].body.messages[0].type,'image');assert.equal(f.pushes[0].body.messages[1].text,'type '+c);assert.equal(f.sql.prepare('SELECT status FROM hinatama_diagnosis_sessions').get().status,'sent');assert.equal(f.sql.prepare('SELECT line_account_id FROM friends').get().line_account_id,'new');}});
 test('missing explicit account, inactive account, invalid code and old paths fail closed',async()=>{const f=fixture();assert.equal((await f.req(path+'/start?code=Z9')).status,400);delete f.env.HINATAMA_CHANNEL_ID;assert.equal((await f.req(path+'/start?code=A1')).status,503);assert.equal((await f.req('/webhook',{method:'POST',body:'{}'})).status,404);assert.equal(f.pushes.length,0);});
@@ -156,4 +156,56 @@ test('a sent mobile receipt opens its own chat once and keeps a tap fallback wit
   store.clear();await render('Mozilla/5.0 (Macintosh)');
   assert.equal(opened.length,1);
   assert.equal(f.pushes.length,1);
+});
+test('authenticated first-party bridge keeps OAuth, cookies, receipts and retries on the branded URL',async()=>{
+  const f=fixture();f.env.HINATAMA_DIAGNOSIS_PUBLIC_URL='https://hinatama.example/lp07/line/';f.env.HINATAMA_BRIDGE_SECRET='bridge-test-secret';
+  const headers={'X-Hinatama-Bridge-Key':'bridge-test-secret','X-Hinatama-Client-IP':'192.0.2.42'};
+  const start=await f.req(path+'/start?code=B2',{headers});const u=new URL(start.headers.get('location'));
+  assert.equal(u.searchParams.get('redirect_uri'),'https://hinatama.example/lp07/line/?step=callback');
+  assert.match(start.headers.get('set-cookie'),/Path=\/lp07\/line\//);
+  const cookie=start.headers.get('set-cookie').split(';')[0],state=u.searchParams.get('state');
+  const callback=await f.req(path+'/callback?state='+state+'&code=ok',{headers:{...headers,Cookie:cookie}});
+  const receipt=new URL(callback.headers.get('location'));
+  assert.equal(receipt.origin,'https://hinatama.example');assert.equal(receipt.pathname,'/lp07/line/');assert.equal(receipt.searchParams.get('step'),'status');
+  assert.deepEqual(f.tokenCallbacks,[u.searchParams.get('redirect_uri')]);
+  const html=await(await f.req(path+'/status?attempt='+receipt.searchParams.get('attempt'),{headers:{...headers,Cookie:cookie}})).text();
+  assert.ok(html.includes('https://hinatama.example/lp07/line/?step=status&amp;')||html.includes('https://hinatama.example/lp07/line/?step=status&'));
+  assert.ok(!html.includes(base));assert.equal(f.pushes.length,1);
+});
+test('forged bridge headers fail closed and direct legacy attempts keep their callback origin',async()=>{
+  const f=fixture();f.env.HINATAMA_DIAGNOSIS_PUBLIC_URL='https://hinatama.example/lp07/line/';f.env.HINATAMA_BRIDGE_SECRET='bridge-test-secret';
+  const invalid=await f.req(path+'/start?code=A1',{headers:{'X-Hinatama-Bridge-Key':'wrong'}});
+  assert.equal(invalid.status,403);assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM hinatama_diagnosis_sessions').get().n,0);
+  const s=await f.start();await f.callback(s);assert.deepEqual(f.tokenCallbacks,[base+path+'/callback']);assert.equal(f.pushes.length,1);
+});
+test('missing or expired callback and receipt show branded recovery instead of a text dead end',async()=>{
+  const f=fixture(),s=await f.start();
+  for(const route of [path+'/callback?state='+s.state+'&code=ok',s.receipt]) {
+    const r=await f.req(route);assert.equal(r.status,400);const html=await r.text();
+    assert.match(r.headers.get('content-type'),/text\/html/);assert.match(html,/ヒナタマ熊本/);
+    assert.match(html,/https:\/\/chat-hinatama.com\/lp07\//);assert.match(html,/https:\/\/line.me\/R\/oaMessage/);
+    assert.ok(!html.includes(s.state));assert.equal(f.pushes.length,0);
+  }
+});
+test('provider login timeout is recoverable without raw error details or result sends',async()=>{
+  const f=fixture(),s=await f.start('D2');f.setTokenFailure(true);const r=await f.callback(s);
+  const html=await(await f.req(r.headers.get('location'),{headers:{Cookie:s.cookie}})).text();
+  assert.match(html,/8問への回答をやり直す必要はありません/);assert.ok(html.includes(path+'/start?code=D2'));
+  assert.ok(!html.includes('private details'));assert.equal(f.pushes.length,0);
+});
+test('a stalled or disconnected receipt exposes refresh and manual consultation without sending again',async()=>{
+  const f=fixture(),s=await f.start();
+  const html=await(await f.req(s.receipt,{headers:{Cookie:s.cookie}})).text(),script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  assert.match(html,/LINEでスタッフに相談する/);
+  for(const disconnected of [false,true]) {
+    const elements=new Map(),timers=[];
+    const context={navigator:{userAgent:'Mozilla/5.0 (iPhone)'},location:{reload(){},assign(){throw Error('pending must not open chat');}},sessionStorage:{getItem(){return null;},setItem(){}},
+      document:{getElementById(id){if(!elements.has(id))elements.set(id,{textContent:'',hidden:true});return elements.get(id);}},
+      fetch:async()=>({ok:!disconnected,json:async()=>({status:'pending',canRetry:false,canReconnect:false})}),setTimeout:fn=>timers.push(fn)};
+    await runInNewContext(script,context);
+    while(timers.length)await timers.shift()();
+    assert.equal(elements.get('refresh').hidden,false);
+    assert.match(elements.get('connection').textContent,disconnected?/更新できませんでした/:/時間がかかっています/);
+  }
+  assert.equal(f.pushes.length,0);
 });
