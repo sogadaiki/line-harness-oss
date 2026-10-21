@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../index.js';
 import {requireRole} from '../middleware/role-guard.js';
+import {funnelReport} from '../services/hinatama-funnel.js';
 import {diagnosisPaused} from '../services/hinatama-diagnosis.js';
 
 const diagnosisAdmin = new Hono<Env>();
@@ -15,6 +16,14 @@ diagnosisAdmin.get('/api/diagnosis/status', async c => {
     (SELECT COUNT(*) FROM hinatama_diagnosis_sessions WHERE line_account_id=? AND status='failed' AND expires_at>unixepoch()) AS currentFailures
   `).bind(id,id,id,id,id).first();
   return c.json({success:true,data:{...data,paused:await diagnosisPaused(c.env.DB,id)}});
+});
+diagnosisAdmin.get('/api/diagnosis/funnel',async c=>{
+  const id=c.get('scopedAccountId');if(!id||id!==c.env.SCOPED_LINE_ACCOUNT_ID)return c.json({success:false,error:'Dedicated account required'},403);
+  const from=c.req.query('from')||'',to=c.req.query('to')||'';
+  const valid=(v:string)=>/^\d{4}-\d{2}-\d{2}$/.test(v)&&Number.isFinite(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v;
+  const span=(Date.parse(to)-Date.parse(from))/86400000;
+  if(!valid(from)||!valid(to)||span<0||span>90)return c.json({success:false,error:'開始日と終了日は90日以内の実在日付にしてください'},400);
+  return c.json({success:true,data:await funnelReport(c.env.DB,id,from,to,{source:c.req.query('source'),campaign:c.req.query('campaign'),version:c.req.query('version')})});
 });
 diagnosisAdmin.post('/api/diagnosis/:action',requireRole('owner','admin'),async c=>{
   const id=c.get('scopedAccountId'),action=c.req.param('action');

@@ -17,6 +17,7 @@ function fixture() {
     INSERT INTO line_accounts VALUES('new','123','new-token','new-secret',1),('old','999','old-token','old-secret',1);`);
   sql.exec(readFileSync(new URL('../../../packages/db/migrations/023_hinatama_diagnosis.sql',import.meta.url),'utf8'));
   sql.exec(readFileSync(new URL('../../../packages/db/migrations/027_hinatama_diagnosis_control.sql',import.meta.url),'utf8'));
+  sql.exec(readFileSync(new URL('../../../packages/db/migrations/028_hinatama_funnel.sql',import.meta.url),'utf8'));
   for(const letter of ['A','B','C','D'])for(const n of [1,2,3])sql.prepare('INSERT INTO hinatama_diagnosis_content VALUES(?,?,?)').run('new',letter+n,JSON.stringify([{type:'image',originalContentUrl:`https://images.example/${letter}.jpg`,previewImageUrl:`https://images.example/${letter}.jpg`},{type:'text',text:`type ${letter+n}`} ]));
   sql.prepare('INSERT INTO hinatama_diagnosis_content VALUES(?,?,?)').run('new','interview',JSON.stringify([{type:'text',text:'staff arranges interview'}]));
   const DB={prepare(query){

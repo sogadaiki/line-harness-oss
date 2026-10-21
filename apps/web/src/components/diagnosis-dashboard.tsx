@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { fetchApi } from '@/lib/api'
 import { useAccount } from '@/contexts/account-context'
+import DiagnosisFunnel from '@/components/diagnosis-funnel'
 
 type Status = {friends:number;resultsAccepted:number;unreadChats:number;replies:number;currentFailures:number;paused:boolean}
 export default function DiagnosisDashboard() {
@@ -15,7 +16,7 @@ export default function DiagnosisDashboard() {
   },[selectedAccountId])
   const cards=[
     {label:'登録された友だち',value:status?.friends,href:'/friends',note:'この環境へ連携した友だちの数です。'},
-    {label:'診断結果の送信',value:status?.resultsAccepted,href:'/friends',note:'LINEが受け付けた件数です。既読や面談数とは別です。'},
+    {label:'LINE送信受付',value:status?.resultsAccepted,href:'/friends',note:'LINEが送信を受け付けた件数です。画面表示とは別の指標です。実際の受信・既読は分かりません。'},
     {label:'未読の相談トーク',value:status?.unreadChats,href:'/chats',note:'店舗スタッフが内容を確認して日程を調整します。'}]
   return <div>
     <h1 className="text-2xl font-bold text-gray-900">診断結果・お仕事相談</h1>
@@ -24,6 +25,7 @@ export default function DiagnosisDashboard() {
     <div className="mt-6 grid gap-4 md:grid-cols-3">{cards.map(c=><Link key={c.href+c.label} href={c.href} className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
       <p className="text-sm text-gray-600">{c.label}</p><p className="my-3 text-3xl font-bold">{c.value??'—'}</p><p className="text-sm leading-6 text-gray-500">{c.note}</p>
     </Link>)}</div>
+    <DiagnosisFunnel />
     <section className="mt-6 rounded-lg border border-gray-200 bg-white p-6">
       <h2 className="text-lg font-semibold">日々の確認</h2>
       {status?.paused&&<p role="alert" className="mt-3 text-red-700">診断の自動返信は休止中です。「診断返信の休止・再開」で状態を確認してください。</p>}
